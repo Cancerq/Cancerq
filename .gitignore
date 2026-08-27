@@ -1,0 +1,21 @@
+# NVDRS is restricted-use data: never commit data files.
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.sas7bdat
+*.dta
+*.sav
+data/
+out/
+tests/sample_data/
+
+# Rules templates are configuration, not data.
+!config/*.json
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+.DS_Store

@@ -1,0 +1,205 @@
+{
+  "circumstance_true": [
+    "yes",
+    "y",
+    "true",
+    "t",
+    "1",
+    "是"
+  ],
+  "circumstance_false": [
+    "no",
+    "n",
+    "false",
+    "f",
+    "0",
+    "否"
+  ],
+  "code_ranges": {
+    "military": [
+      [
+        9800,
+        9830
+      ]
+    ],
+    "construction": [
+      [
+        6200,
+        6765
+      ]
+    ],
+    "construction_extraction": [
+      [
+        6800,
+        6940
+      ]
+    ],
+    "non_workforce": [
+      [
+        9840,
+        9840
+      ],
+      [
+        9920,
+        9920
+      ]
+    ]
+  },
+  "construction_industry_codes": [
+    770
+  ],
+  "keywords": {
+    "unknown_exact": [
+      "unknown",
+      "unk",
+      "u",
+      "not available",
+      "not applicable",
+      "unspecified",
+      "missing",
+      "refused",
+      "blank",
+      "n/a",
+      "na",
+      "none",
+      "other",
+      "unemployed unknown"
+    ],
+    "unknown_contains": [
+      "not specified",
+      "not stated",
+      "not reported",
+      "no information",
+      "unknown occupation",
+      "occupation unknown"
+    ],
+    "military": [
+      "military",
+      "armed forces",
+      "armed service",
+      "army",
+      "navy",
+      "naval",
+      "marine corps",
+      "air force",
+      "space force",
+      "coast guard",
+      "national guard",
+      "soldier",
+      "sailor",
+      "airman",
+      "usmc",
+      "us army",
+      "u.s. army",
+      "service member",
+      "servicemember",
+      "active duty",
+      "enlisted"
+    ],
+    "construction": [
+      "construction",
+      "carpenter",
+      "carpentry",
+      "electrician",
+      "plumber",
+      "plumbing",
+      "pipefitter",
+      "pipe fitter",
+      "steamfitter",
+      "roofer",
+      "roofing",
+      "mason",
+      "masonry",
+      "brickmason",
+      "brick layer",
+      "bricklayer",
+      "cement",
+      "concrete",
+      "drywall",
+      "sheetrock",
+      "plasterer",
+      "stucco",
+      "painter",
+      "painting contractor",
+      "glazier",
+      "insulation worker",
+      "ironworker",
+      "iron worker",
+      "steel worker",
+      "structural steel",
+      "sheet metal",
+      "welder",
+      "boilermaker",
+      "framer",
+      "framing",
+      "drilling",
+      "excavat",
+      "scaffold",
+      "paving",
+      "asphalt",
+      "highway maintenance",
+      "heavy equipment operator",
+      "crane operator",
+      "backhoe",
+      "bulldozer",
+      "general contractor",
+      "building contractor",
+      "construction laborer",
+      "hvac",
+      "heating and air",
+      "air conditioning install",
+      "surveying technician",
+      "septic",
+      "well driller"
+    ],
+    "non_workforce": [
+      "unemployed",
+      "not employed",
+      "no occupation",
+      "never worked",
+      "never employed",
+      "not in labor force",
+      "not in the labor force",
+      "out of work",
+      "jobless",
+      "retired",
+      "retiree",
+      "pensioner",
+      "student",
+      "pupil",
+      "school child",
+      "schoolchild",
+      "homemaker",
+      "housewife",
+      "house wife",
+      "househusband",
+      "house husband",
+      "stay at home",
+      "stay-at-home",
+      "domestic duties",
+      "disabled",
+      "disability",
+      "unable to work",
+      "on ssi",
+      "ssi recipient",
+      "ssdi",
+      "social security disability",
+      "on welfare",
+      "institutionalized",
+      "inmate",
+      "prisoner",
+      "incarcerated",
+      "infant",
+      "toddler",
+      "child not in school",
+      "volunteer",
+      "unpaid",
+      "non-paid worker",
+      "nonpaid worker",
+      "homeless",
+      "veteran",
+      "retired military"
+    ]
+  },
+  "age_band_pattern": "(\\d{2})\\s*[-_to]{1,3}\\s*(\\d{2})"
+}

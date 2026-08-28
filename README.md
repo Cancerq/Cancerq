@@ -167,6 +167,47 @@ python nvdrs_split.py --input data/ --output-dir out/ --rules my_rules.json
 | `--rules` | 规则覆盖 JSON |
 | `--dump-rules` | 打印默认规则 JSON 后退出 |
 
+## 核对布尔列：`verify_circumstance.py`
+
+分批核对原始列 `circumstance_known_c`（Yes/No）与派生列 `circumstance_known_bool`
+（TRUE/FALSE）是否一致。文件是**分块（chunked）读**的，几十万行也不占内存。
+
+```bash
+# 每 1000 行一批，走完整个文件
+python verify_circumstance.py --input out/labeled/18_30_labeled.csv
+
+# 只打印有问题的批次（文件大时最实用）
+python verify_circumstance.py --input out/labeled/ --mismatches-only
+
+# 翻页看：每批 500 行，一次只看 2 批，按提示用 --start-row 继续
+python verify_circumstance.py --input file.csv --batch-size 500 --max-batches 2
+
+# 把不一致的行和取值配对表写出来
+python verify_circumstance.py --input out/labeled/ --output-dir report/
+```
+
+每批输出「原始值 × 布尔值」的计数，标 `[OK]` 或 `[N MISMATCH]`；不一致的行直接列出
+行号、ID、两列取值、以及应该是什么。最后给全量交叉表和准确率。有不一致时退出码为 1，
+可以直接串进脚本里。
+
+判定标准就是映射规则本身：`Yes`→`TRUE`，`No`→`FALSE`，**其他一切**（空值、`Unknown`）
+→`UNDETERMINED`（即 pandas 的 `<NA>`）。注意报告里用 `UNDETERMINED` 而不是 `<NA>` 或
+`NA` —— 后两者是 pandas 的默认缺失值标记，写进 CSV 再读回来会变成 NaN。
+
+如果你拆分时用了 `--rules` 改过 Yes/No 的取值集合，核对时传同一个文件：
+`--rules my_rules.json`。
+
+| 参数 | 说明 |
+|---|---|
+| `--input` | CSV 文件或目录，可多个 |
+| `--raw-col` / `--bool-col` | 手动指定两列（默认自动识别） |
+| `--id-col` | 不一致行旁边显示的标识列（默认找 IncidentID） |
+| `--batch-size` | 每批行数，默认 1000 |
+| `--start-row` / `--max-batches` | 翻页 |
+| `--show-rows` | 每批最多打印几行不一致，默认 10 |
+| `--mismatches-only` | 只打印有问题的批次 |
+| `--output-dir` | 输出 `circumstance_mismatches.csv` 和 `circumstance_value_pairs.csv` |
+
 ## 测试
 
 用合成数据（不含任何真实 NVDRS 记录）做端到端校验：
@@ -174,11 +215,16 @@ python nvdrs_split.py --input data/ --output-dir out/ --rules my_rules.json
 ```bash
 python tests/make_sample_data.py tests/sample_data   # 可选，单独生成样例
 PYTHONPATH=tests python tests/test_nvdrs_split.py
+python tests/test_verify_circumstance.py
 ```
 
-覆盖：编码路径与关键词路径的分类正确性、`Yes/No/Unknown/空` 的布尔映射、
-8 个拆分文件齐全、拆分对原数据无重叠无遗漏、汇总计数自洽、兜底复核文件内容、
-`--inspect` / `--drop-unknown-circumstance` / `--include-extraction` 各模式可运行。
+`test_nvdrs_split.py` 覆盖：编码路径与关键词路径的分类正确性、`Yes/No/Unknown/空`
+的布尔映射、8 个拆分文件齐全、拆分对原数据无重叠无遗漏、汇总计数自洽、兜底复核文件
+内容、`--inspect` / `--drop-unknown-circumstance` / `--include-extraction` 各模式可运行。
+
+`test_verify_circumstance.py` 会**故意注入 3 处错误**（Yes 配成 FALSE、No 配成 TRUE、
+Unknown 被当成 FALSE），断言脚本恰好抓到这 3 行、行号正确、分块读不丢行，以及干净文件
+报 100%。
 
 ## 注意
 

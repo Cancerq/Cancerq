@@ -486,12 +486,16 @@ def collect_inputs(inputs, encoding: str) -> list[Path]:
     return files
 
 
-def read_csv(path: Path, encoding: str) -> pd.DataFrame:
+def read_csv(path: Path, encoding: str, **kwargs) -> pd.DataFrame:
     try:
-        return pd.read_csv(path, dtype=str, keep_default_na=True, encoding=encoding)
+        return pd.read_csv(
+            path, dtype=str, keep_default_na=True, encoding=encoding, **kwargs
+        )
     except UnicodeDecodeError:
         # NVDRS exports are frequently latin-1 / cp1252 rather than utf-8.
-        return pd.read_csv(path, dtype=str, keep_default_na=True, encoding="latin-1")
+        return pd.read_csv(
+            path, dtype=str, keep_default_na=True, encoding="latin-1", **kwargs
+        )
 
 
 def inspect(files: list[Path], args) -> None:

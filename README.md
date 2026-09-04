@@ -6,17 +6,86 @@
 1. **circumstance known** —— 布尔化（`Yes` → `True`，`No` → `False`）
 2. **occupation** —— 四分类：`construction` / `non_construction` / `non_workforce` / `military`
 
-## 快速开始
+## 完整流程
 
 ```bash
 pip install pandas
 
-# 1) 先看脚本在你的文件里认出了哪些列、各列有哪些取值（不写任何文件）
-python nvdrs_split.py --input path/to/your/csvs/ --inspect
+# 第 0 步：先按 incident year 2020-2023 筛选（见下节）
+python filter_years.py --input input_list.txt --years 2020-2023 --output-dir filtered/
 
-# 2) 确认列名对了，再正式跑
-python nvdrs_split.py --input path/to/your/csvs/ --output-dir out/
+# 第 1 步：看脚本在文件里认出了哪些列、各列有哪些取值（不写任何文件）
+python nvdrs_split.py --input filtered/ --inspect
+
+# 第 2 步：确认列名对了，正式拆分
+python nvdrs_split.py --input filtered/ --output-dir out/
+
+# 第 3 步：核对派生的布尔列（见后文）
+python verify_circumstance.py --input out/labeled/ --mismatches-only
 ```
+
+## 按 incident year 筛选：`filter_years.py`
+
+只保留 incident year 在指定范围内的行，默认 2020–2023。**放在整个流程最前面**，
+这样后面的年龄段拆分和职业分类只会看到你要的年份。
+
+在 Python 里直接把已有的 `input_list` 传进去：
+
+```python
+from filter_years import filter_year_range
+
+result = filter_year_range(input_list, years=(2020, 2023), output_dir="filtered/")
+print(result["rows_kept"], "rows kept of", result["rows_read"])
+```
+
+命令行：
+
+```bash
+# 先看各文件的年份分布，不写文件
+python filter_years.py --input raw/ --inspect
+
+# 筛选。--input 接受 CSV 路径、目录，或一个每行一个路径的 .txt
+python filter_years.py --input input_list.txt --years 2020-2023 --output-dir filtered/
+
+# 不连续的年份也行
+python filter_years.py --input raw/ --years 2020 2022 2023 --output-dir filtered/
+```
+
+输出每个文件的年份分布表（标明哪些年份被保留）、保留/丢弃计数，以及汇总的
+`year_distribution.csv`。没有任何行匹配时退出码为 1。
+
+```
+nvdrs_2018_2024.csv  (year column: incident_year)
+   year  n  kept
+   2018  3 False
+   2020  3  True
+   ...
+MISSING  1 False
+  22 rows -> kept 12, dropped 10
+```
+
+**关于「incident year」的重要说明**：NVDRS 里同时有 incident year、death year、
+injury year，跨年案例中三者可以不同。脚本**只**自动识别 incident 年份列
+（`IncidentYear`、`incident_year`、`IncidentDate` 等）；如果文件里只有
+`death_year` / `injury_year` 这类列，它会**停下来报错并指出这些列不是 incident
+year**，而不是拿它们凑合。要用其他列就显式写 `--year-col`。
+
+年份取值支持纯年份（`2020`、`2020.0`）和含年份的日期（`2020-05-13`、`5/13/2020`、
+`13JUL2022`）。两位数年份（`20`）**不会**被猜成 20xx —— 归为 `UNPARSEABLE` 单独报出。
+空值归为 `MISSING`。这两类都会被丢弃，但会在汇总里明确列出行数，不会悄悄消失。
+
+文件是分块读、分块追加写的，大文件不占内存（测试里断言了分块与单次读结果一致）。
+重复传同一个路径会自动去重，不会把行数翻倍。
+
+| 参数 | 说明 |
+|---|---|
+| `--input` | CSV 文件、目录，或每行一个路径的 `.txt` |
+| `--years` | `2020-2023`、`2020:2023`，或 `2020 2021 2022 2023` |
+| `--output-dir` | 输出目录，默认 `filtered` |
+| `--year-col` | 手动指定年份列（自动识别失败或选错时） |
+| `--suffix` | 输出文件名后缀，默认 `_2020_2023` |
+| `--inspect` | 只报告年份列和分布，不写文件 |
+| `--batch-size` | 每块行数，默认 100000 |
 
 `--input` 可以是一个目录（读取其中所有 `*.csv`），也可以是若干个文件：
 
@@ -216,6 +285,7 @@ python verify_circumstance.py --input out/labeled/ --output-dir report/
 python tests/make_sample_data.py tests/sample_data   # 可选，单独生成样例
 PYTHONPATH=tests python tests/test_nvdrs_split.py
 python tests/test_verify_circumstance.py
+python tests/test_filter_years.py
 ```
 
 `test_nvdrs_split.py` 覆盖：编码路径与关键词路径的分类正确性、`Yes/No/Unknown/空`
@@ -225,6 +295,11 @@ python tests/test_verify_circumstance.py
 `test_verify_circumstance.py` 会**故意注入 3 处错误**（Yes 配成 FALSE、No 配成 TRUE、
 Unknown 被当成 FALSE），断言脚本恰好抓到这 3 行、行号正确、分块读不丢行，以及干净文件
 报 100%。
+
+`test_filter_years.py` 覆盖：年份边界精确（2019 和 2024 一定被排除）、只有 death year
+时拒绝猜测、incident year 与 death year 同时存在时选对列、`input_list` / 目录 / `.txt`
+三种输入等价、重复路径去重、分块读与单次读结果一致、日期格式取年、空值与不可解析年份
+被单独报出。
 
 ## 注意
 

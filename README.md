@@ -96,7 +96,56 @@ python run_electrician_split.py --input-dir "OUTPUT_DIR\2024" --output-dir "..."
 
 测试里**实跑了这个串联**：确认 `2024/` 目录能被电工脚本读取，且只看到 2024 的行。
 
-## 第二步：电工三分组 —— `run_electrician_split.py`
+## 第二步（按年）：电工三分组 —— `run_electrician_by_year.py`
+
+输入 `split_by_year.py` 产出的 `_all_ages/nvdrs_2018_all_ages.csv ... nvdrs_2024_all_ages.csv`，
+每年拆成电工三组 + 跨年合并。
+
+```bash
+# 填好配置区的 INPUT_DIR（OUTPUT_DIR 已预填）后直接运行
+python run_electrician_by_year.py
+```
+
+```
+OUTPUT_DIR/
+  2018/  Construction_electrician_2018.csv
+         Non_construction_electrician_2018.csv
+         Unknown_industry_electrician_2018.csv
+         All_industry_electrician_2018.csv
+  ...
+  2024/  ...
+  _all_years/  Construction_electrician_all_years.csv ...（带 incident_year 列）
+  summary_by_year.csv / file_map.csv
+  electrician_industry_values.csv / matched_occupation_values.csv
+```
+
+### 建筑业口径：exact 还是 contains
+
+「行业是 Construction」和「行业出现 Construction」结果不同。默认 `exact`，但**每次运行
+都会把两种口径的行数和差异值都算出来**，不用重跑就能对比：
+
+```
+建筑业判定口径对比
+  等于 'construction'（exact）   ：95 名电工
+  含有 'construction'（contains）：120 名电工
+  当前用的是：exact
+
+  这 25 行只有 contains 会算作建筑业：
+          17  Construction and extraction
+           8  Heavy construction contractors
+  要改口径：把 CONSTRUCTION_MATCH 改成 "contains"
+```
+
+### 另外三点
+
+- **年份取自文件名，但会和数据里的 `IncidentYear` 列核对**。不一致会告警并说明
+  这些行仍按文件名归档 —— 输入文件放错时能立刻发现。没有 `IncidentYear` 列时
+  自动跳过核对，不会误报。
+- **两个文件解析出同一年份会直接报错**（否则后写的会覆盖先写的），并列出是哪两个。
+- **每一年单独核对** `All = Construction + Non_construction + Unknown_industry`，
+  不只是总数对得上。
+
+## 第二步（按年龄段）：电工三分组 —— `run_electrician_split.py`
 
 **判断只看两列的文本内容，不查任何码表：**
 
@@ -721,6 +770,7 @@ python tests/test_census_2018_only.py
 python tests/test_run_construction_split.py
 python tests/test_run_electrician_split.py
 python tests/test_split_by_year.py
+python tests/test_run_electrician_by_year.py
 ```
 
 `test_nvdrs_split.py` 覆盖：编码路径与关键词路径的分类正确性、`Yes/No/Unknown/空`

@@ -31,7 +31,72 @@ python verify_circumstance.py --input out/labeled/ --mismatches-only
 
 先筛年份再切年龄，后面每一步处理的数据量都小一截。
 
-## 电工三分组：`run_electrician_split.py`
+## 第一步：按 IncidentYear 拆年 —— `split_by_year.py`
+
+把年龄段 CSV 按 `IncidentYear` 拆成 2018–2024 各年。**只看这一列**，不碰
+occupation / industry。
+
+```bash
+# 填好配置区的 INPUT_DIR 和 OUTPUT_DIR 后直接运行
+python split_by_year.py
+
+# 或命令行
+python split_by_year.py --input-dir "D:\...\age_chunks" --output-dir "D:\...\Label_year"
+```
+
+### 输出结构
+
+年份目录里的**文件名与输入完全一致**，所以下一步把 `--input-dir` 指过去就能跑：
+
+```
+OUTPUT_DIR/
+  2018/  nvdrs_age_18_27.csv  nvdrs_age_28_37.csv  ...  nvdrs_age_58_67.csv
+  2019/  ...
+  ...
+  2024/  ...
+  _all_ages/   nvdrs_2018_all_ages.csv ... nvdrs_2024_all_ages.csv   各年合并版
+  _excluded/   out_of_range.csv / blank_year.csv / unparseable_year.csv
+  year_distribution.csv        IncidentYear 每个取值的行数
+  summary_by_year_and_age.csv  年份 × 年龄段 计数表
+  file_map.csv                 输入 -> 输出 完整路径对照
+```
+
+合并版**放在 `_all_ages/` 而不是年份目录里** —— 否则下一步扫描该目录时会把合并文件
+和 5 个分段文件一起读进去，行数直接翻倍。
+
+```
+age_band  18_27  28_37  38_47  48_57  58_67  TOTAL
+year
+2018          8      8      8      8      8     40
+2019          9      9      9      9      9     45
+...
+读入总行数：450
+保留（2018-2024）：385
+排除：65
+  年份在范围外：30    年份空白：25    年份读不出：10
+  （保留 + 排除 = 读入，没有行丢失或重复）
+```
+
+### 几个做严的地方
+
+- **只认 IncidentYear，绝不拿 DeathYear 顶替**。跨年案例里（12 月受伤、1 月死亡）
+  两者不同。文件里只有 `DeathYear` 时会报错并点名说明它不是 incident year，
+  而不是默默拿它筛。测试里构造了两列给出相反答案的数据来验证选对了。
+- **年份边界精确**：2017 和 2025 一定被排除（测试逐个边界验过）。
+- **两位数年份（`24`）不猜**，归为 `UNPARSEABLE` 单独写出。日期格式
+  （`2024-05-13`、`5/13/2020`）能正确取年。
+- **每一行都有交代**：写进某年，或计入三类排除之一，相加必等于读入总数。
+- 分块读写，1.7 GB 输入也只占几百 MB 内存；不同 chunk-size 输出一致。
+
+### 接下一步
+
+```bash
+python run_electrician_split.py --input-dir "OUTPUT_DIR\2024" --output-dir "..."
+```
+
+测试里**实跑了这个串联**：确认 `2024/` 目录能被电工脚本读取，且只看到 2024 的行。
+
+## 第二步：电工三分组 —— `run_electrician_split.py`
 
 **判断只看两列的文本内容，不查任何码表：**
 
@@ -655,6 +720,7 @@ python tests/test_filter_construction.py
 python tests/test_census_2018_only.py
 python tests/test_run_construction_split.py
 python tests/test_run_electrician_split.py
+python tests/test_split_by_year.py
 ```
 
 `test_nvdrs_split.py` 覆盖：编码路径与关键词路径的分类正确性、`Yes/No/Unknown/空`

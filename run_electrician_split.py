@@ -29,11 +29,167 @@ from pathlib import Path
 
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# =============================================================================
+# 单文件自带：Census 2018 码表与解析工具（无需其他 .py 文件，只依赖 pandas）
+#
+# 这一段原本是 census_2018.py / census_2018_industry.py 两个模块，内联进来是为了
+# 让本脚本可以单独拷到任何机器上直接运行。仓库里的测试会核对这里的码段与那两个
+# 模块完全一致，所以不会出现两处定义不同步的情况。
+# =============================================================================
 
-import census_2018 as occ            # noqa: E402  职业码
-import census_2018_industry as ind   # noqa: E402  行业码
-from census_2018 import BLANK, UNPARSEABLE, parse_code  # noqa: E402
+# --- 职业码（Census2018_Occupation）---------------------------------------
+ELECTRICIANS = 6330                       # Electricians
+OCC_COL_CANDIDATES = (
+    "census2018occupation", "census2018occ", "census2018",
+    "censusoccupation2018", "occupationcensus2018", "occ2018",
+)
+OCCUPATION_TITLES = {
+    6200: "First-line supervisors of construction trades and extraction workers",
+    6230: "Carpenters",
+    6260: "Construction laborers",
+    6320: "Drywall installers, ceiling tile installers, and tapers",
+    6330: "Electricians",
+    6441: "Plumbers, pipefitters, and steamfitters",
+    6515: "Roofers",
+    6540: "Solar photovoltaic installers",
+    6600: "Helpers, construction trades",
+    6765: "Other construction and related workers",
+}
+
+# --- 行业码（Census2018_Industry）------------------------------------------
+# 行业码表里 Construction 是【单个码】0770，不是区间。采矿是另一个大类。
+CONSTRUCTION_INDUSTRY = (770, 770)
+MINING_INDUSTRY = (370, 490)
+IND_COL_CANDIDATES = (
+    "census2018industry", "censusindustry2018", "industrycensus2018",
+    "census2018ind", "industry2018", "ind2018",
+)
+# 行业大类名称，仅用于 breakdown 显示。筛选只依据上面的数值码段，
+# 所以名称不全也绝不会改变你拿到的行。
+INDUSTRY_SECTORS = [
+    ((170, 290), "Agriculture, forestry, fishing and hunting"),
+    ((370, 490), "Mining, quarrying, and oil and gas extraction"),
+    ((570, 690), "Utilities"),
+    ((770, 770), "Construction"),
+    ((1070, 3990), "Manufacturing"),
+    ((4070, 4590), "Wholesale trade"),
+    ((4670, 5790), "Retail trade"),
+    ((6070, 6390), "Transportation and warehousing"),
+    ((6470, 6780), "Information"),
+    ((6870, 6992), "Finance and insurance"),
+    ((7071, 7190), "Real estate and rental and leasing"),
+    ((7270, 7490), "Professional, scientific, and technical services"),
+    ((7570, 7570), "Management of companies and enterprises"),
+    ((7580, 7790), "Administrative, support and waste management services"),
+    ((7860, 7890), "Educational services"),
+    ((7970, 8470), "Health care and social assistance"),
+    ((8561, 8590), "Arts, entertainment, and recreation"),
+    ((8660, 8690), "Accommodation and food services"),
+    ((8770, 9290), "Other services, except public administration"),
+    ((9370, 9590), "Public administration"),
+    ((9670, 9870), "Military"),
+    ((9920, 9920), "Unemployed, with no work experience or never worked"),
+]
+
+BLANK = "BLANK"
+UNPARSEABLE = "UNPARSEABLE"
+MISSING_TOKENS = {"", ".", "-", "--", "nan", "none", "null", "<na>"}
+
+
+def norm_value(value) -> str:
+    """小写、压缩空白；缺失值返回空字符串。"""
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    text = re.sub(r"\s+", " ", str(value)).strip().lower()
+    return "" if text in MISSING_TOKENS else text
+
+
+def norm_colname(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(name).lower())
+
+
+def parse_code(value) -> "int | str":
+    """把码值解析成整数，或 BLANK / UNPARSEABLE。
+
+    接受 "6330"、"06330"、"6330.0"、6330。非数字一律不猜，返回 UNPARSEABLE。
+    """
+    text = norm_value(value)
+    if not text:
+        return BLANK
+    match = re.fullmatch(r"(\d{1,5})(?:\.0+)?", text)
+    return int(match.group(1)) if match else UNPARSEABLE
+
+
+def in_ranges(code: int, ranges) -> bool:
+    return any(low <= code <= high for low, high in ranges)
+
+
+def build_construction_ranges(include_mining: bool = False):
+    ranges = [CONSTRUCTION_INDUSTRY]
+    if include_mining:
+        ranges.append(MINING_INDUSTRY)
+    return sorted(ranges)
+
+
+def describe_ranges(ranges) -> str:
+    return ", ".join(
+        f"{low:04d}" if low == high else f"{low:04d}-{high:04d}" for low, high in ranges
+    )
+
+
+def sector_of(code) -> str:
+    if not isinstance(code, int):
+        return ""
+    for (low, high), name in INDUSTRY_SECTORS:
+        if low <= code <= high:
+            return name
+    return ""
+
+
+def occupation_title(code) -> str:
+    return OCCUPATION_TITLES.get(code, "") if isinstance(code, int) else ""
+
+
+def find_industry_column(columns, exclude=()):
+    excluded = set(exclude)
+    normalised = {norm_colname(c): c for c in columns if c not in excluded}
+    for cand in IND_COL_CANDIDATES:
+        if cand in normalised:
+            return normalised[cand]
+    for cand in IND_COL_CANDIDATES:
+        for norm, original in normalised.items():
+            if cand in norm:
+                return original
+    return None
+
+
+def find_occupation_column(columns, exclude=()):
+    """找职业码列，绝不会返回行业列。
+
+    "Census2018_Industry" 归一化后是 "census2018industry"，【包含】职业列的候选词
+    "census2018"。没有这道防护，子串匹配会把行业列当成职业列，导致每个码都对着
+    错误的码表解释。
+    """
+    excluded = set(exclude)
+    normalised = {
+        norm_colname(c): c
+        for c in columns
+        if c not in excluded and "industry" not in norm_colname(c)
+    }
+    for cand in OCC_COL_CANDIDATES:
+        if cand in normalised:
+            return normalised[cand]
+    for cand in OCC_COL_CANDIDATES:
+        for norm, original in normalised.items():
+            if cand in norm:
+                return original
+    return None
+
 
 # =============================================================================
 # 配置区
@@ -70,7 +226,7 @@ INDUSTRY_COL = r""
 #   6600  Helpers, construction trades（电工帮工并入了这个总类，无法单独拆出）
 #   电力线路安装维修工 / 电气电子维修工 属于 Installation, Maintenance and Repair
 #   大类（7000-7640），不是 Electricians
-ELECTRICIAN_CODES = [6330]
+ELECTRICIAN_CODES = [ELECTRICIANS]   # 6330
 
 # 行业未知（码为空或读不出）的电工怎么处理：
 #   "separate"        -> 单独写 Unknown_industry_electrician（默认）
@@ -201,7 +357,7 @@ def resolve_columns(columns, occ_override: str, ind_override: str) -> tuple[str,
             fail(f"INDUSTRY_COL 指定的列 {industry!r} 不在文件里。\n"
                  f"该文件的列有：{', '.join(map(str, columns))}")
     else:
-        industry = ind.find_industry_column(columns)
+        industry = find_industry_column(columns)
 
     if occ_override and occ_override.strip():
         occupation = occ_override.strip()
@@ -209,7 +365,7 @@ def resolve_columns(columns, occ_override: str, ind_override: str) -> tuple[str,
             fail(f"OCCUPATION_COL 指定的列 {occupation!r} 不在文件里。\n"
                  f"该文件的列有：{', '.join(map(str, columns))}")
     else:
-        occupation = occ.find_occupation_column(
+        occupation = find_occupation_column(
             columns, exclude=[industry] if industry else []
         )
 
@@ -282,7 +438,7 @@ def run(
 
     files = resolve_inputs(input_dir, input_files)
     out_dir = resolve_output(output_dir)
-    constr_ranges = ind.build_construction_ranges(include_mining)
+    constr_ranges = build_construction_ranges(include_mining)
     separate_unknown = unknown_industry_goes_to == "separate"
     groups = [g for g in GROUPS if separate_unknown or g != "Unknown_industry_electrician"]
 
@@ -292,8 +448,8 @@ def run(
         print(f"  [{band_of(path)[0]:>5}] {path}  ({path.stat().st_size / 1048576:,.0f} MB)")
     print(f"\n输出目录：{out_dir}")
     print(f"\n电工（职业码 Census2018_Occupation）：{sorted(elec)}"
-          f"  -> {', '.join(occ.title(c) or '?' for c in sorted(elec))}")
-    print(f"Construction（行业码 Census2018_Industry）：{ind.describe_ranges(constr_ranges)}")
+          f"  -> {', '.join(occupation_title(c) or '?' for c in sorted(elec))}")
+    print(f"Construction（行业码 Census2018_Industry）：{describe_ranges(constr_ranges)}")
     print(f"  采矿 0370-0490 : {'计入' if include_mining else '不计入'}")
     print(f"  行业未知的电工 : "
           f"{'单独成组' if separate_unknown else '并入 Non_construction_electrician'}")
@@ -342,7 +498,7 @@ def run(
                 industry_counts[value] = industry_counts.get(value, 0) + int(n)
 
             is_constr = ind_codes.map(
-                lambda c: isinstance(c, int) and ind.in_ranges(c, constr_ranges)
+                lambda c: isinstance(c, int) and in_ranges(c, constr_ranges)
             )
             is_unknown = ind_codes.isin([BLANK, UNPARSEABLE])
 
@@ -424,9 +580,9 @@ def run(
     breakdown = pd.DataFrame([
         {
             "Census2018_Industry": str(v),
-            "sector": ind.sector(v),
+            "sector": sector_of(v),
             "n_electricians": n,
-            "is_construction": isinstance(v, int) and ind.in_ranges(v, constr_ranges),
+            "is_construction": isinstance(v, int) and in_ranges(v, constr_ranges),
         }
         for v, n in sorted(industry_counts.items(), key=lambda kv: str(kv[0]))
     ])

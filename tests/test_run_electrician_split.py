@@ -105,6 +105,60 @@ def main() -> int:
         per_band = len(ROWS) * reps
         total = per_band * len(BANDS)
 
+        print("\n-- the script is self-contained: no local imports --")
+        source = Path(res.__file__).read_text(encoding="utf-8")
+        import re as _re
+        local_imports = _re.findall(
+            r"^(?:from|import)\s+(census_2018\w*|nvdrs_split|filter_\w+|split_by_age)",
+            source, _re.M,
+        )
+        check(not local_imports,
+              f"no imports of sibling repo modules (found {local_imports})")
+        third_party = set(_re.findall(r"^import (\w+)", source, _re.M)) - {
+            "argparse", "re", "sys"
+        }
+        check(third_party == {"pandas"},
+              f"pandas is the only third-party dependency (found {sorted(third_party)})")
+
+        alone = workdir / "alone"
+        alone.mkdir()
+        shutil.copy(res.__file__, alone / "run_electrician_split.py")
+        import subprocess
+        proc = subprocess.run(
+            [sys.executable, "run_electrician_split.py",
+             "--input-dir", str(data), "--output-dir", str(workdir / "alone_out")],
+            cwd=alone, capture_output=True, text=True,
+        )
+        check(proc.returncode == 0,
+              f"runs from a folder containing only itself (exit {proc.returncode})"
+              + ("" if proc.returncode == 0 else f"\n{proc.stderr[-600:]}"))
+        check((workdir / "alone_out" / "All_industry_electrician_all_ages.csv").is_file(),
+              "and produces its output there")
+
+        print("\n-- inlined code tables match the shared modules (no drift) --")
+        import census_2018 as _occ
+        import census_2018_industry as _ind
+        check(res.CONSTRUCTION_INDUSTRY == _ind.CONSTRUCTION,
+              f"construction industry code: {res.CONSTRUCTION_INDUSTRY} == {_ind.CONSTRUCTION}")
+        check(res.MINING_INDUSTRY == _ind.MINING_EXTRACTION,
+              f"mining range: {res.MINING_INDUSTRY} == {_ind.MINING_EXTRACTION}")
+        check(res.INDUSTRY_SECTORS == _ind.SECTORS, "industry sector table identical")
+        check(tuple(res.IND_COL_CANDIDATES) == tuple(_ind.COL_CANDIDATES),
+              "industry column candidates identical")
+        check(set(res.OCC_COL_CANDIDATES) <= set(_occ.CENSUS_2018_COL_CANDIDATES),
+              "occupation column candidates are a subset of the shared list")
+        check(res.ELECTRICIANS == 6330 and _occ.TITLES[6330] == "Electricians",
+              "6330 is Electricians in both")
+        for code, title in res.OCCUPATION_TITLES.items():
+            if _occ.TITLES.get(code) and _occ.TITLES[code] != title:
+                check(False, f"title for {code} differs from the shared table")
+                break
+        else:
+            check(True, "every inlined occupation title matches the shared table")
+        for raw in ["6330", "06330", "6330.0", "", "n/a", "0770"]:
+            check(res.parse_code(raw) == _occ.parse_code(raw),
+                  f"parse_code({raw!r}) agrees with the shared parser")
+
         print("\n-- column resolution: industry must not be read as occupation --")
         import census_2018 as occ
         import census_2018_industry as ind

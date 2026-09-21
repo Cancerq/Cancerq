@@ -44,6 +44,11 @@ python verify_circumstance.py --input out/labeled/ --mismatches-only
 
 **电工是职业码，construction 是行业码，两列缺一不可。**
 
+这个脚本是**单文件**的：Census 2018 码表和解析逻辑都内联在文件里，除了 pandas
+没有任何依赖，可以单独拷到任何机器上直接跑，不需要仓库里的其他 `.py`。测试里会
+把它拷到一个只有它自己的空目录里实跑一遍，并逐项核对内联的码段与
+`census_2018.py` / `census_2018_industry.py` 完全一致，所以不会出现两处定义漂移。
+
 ```bash
 # 填好配置区的 INPUT_DIR（OUTPUT_DIR 已预填）后直接运行
 python run_electrician_split.py

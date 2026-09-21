@@ -33,21 +33,19 @@ python verify_circumstance.py --input out/labeled/ --mismatches-only
 
 ## 电工三分组：`run_electrician_split.py`
 
-从年龄段 CSV 里筛出电工，再按行业交叉分成三组（外加一组行业未知）：
+**判断只看两列的文本内容，不查任何码表：**
+
+```
+是电工    = Census2018_Occupation  含有  "Electrician"   （不区分大小写）
+是建筑业  = Census2018_Industry     等于  "Construction"  （不区分大小写、忽略首尾空格）
+```
 
 | 组 | 定义 |
 |---|---|
-| `Construction_electrician` | `Census2018_Occupation` = 6330 **且** `Census2018_Industry` = 0770 |
-| `Non_construction_electrician` | 6330 **且** 行业为其他已知行业 |
-| `Unknown_industry_electrician` | 6330 **且** 行业码为空或读不出 |
-| `All_industry_electrician` | 6330，不分行业（= 上面三组之和） |
-
-**电工是职业码，construction 是行业码，两列缺一不可。**
-
-这个脚本是**单文件**的：Census 2018 码表和解析逻辑都内联在文件里，除了 pandas
-没有任何依赖，可以单独拷到任何机器上直接跑，不需要仓库里的其他 `.py`。测试里会
-把它拷到一个只有它自己的空目录里实跑一遍，并逐项核对内联的码段与
-`census_2018.py` / `census_2018_industry.py` 完全一致，所以不会出现两处定义漂移。
+| `Construction_electrician` | 是电工 且 行业 = Construction |
+| `Non_construction_electrician` | 是电工 且 行业 = 其他已填写的行业 |
+| `Unknown_industry_electrician` | 是电工 且 行业为空 / Unknown |
+| `All_industry_electrician` | 是电工，不分行业（= 上面三组之和） |
 
 ```bash
 # 填好配置区的 INPUT_DIR（OUTPUT_DIR 已预填）后直接运行
@@ -57,26 +55,55 @@ python run_electrician_split.py
 python run_electrician_split.py --input-dir "D:\...\age_chunks"
 ```
 
-每组都产出年龄分层（5 个）+ 合并（1 个），共 24 个 CSV，加上 `file_map.csv`、
-`summary_by_age_band.csv`、`electrician_industry_breakdown.csv`。
+单文件，只依赖 pandas，可以单独拷到任何机器上跑。每组产出年龄分层（5 个）+ 合并
+（1 个），共 24 个 CSV。
 
-### 三点要注意
+### 关键：contains 与 equals 的区别是有意的
+
+职业用**包含**，所以 `Electricians`、`Electrician`、`Electrician, apprentice` 都能
+匹配；而 `Electrical power-line installers and repairers`、
+`Electrical and electronics repairers` **不会**被当成电工（它们不含 "electrician"）。
+
+行业用**等于**，所以 `Construction and extraction`、
+`Heavy construction contractors` 这类含有 "construction" 但整格不等于的写法
+**不算**建筑业。测试里专门放了这几个近似值来验证。
+
+如果你的数据里写法不同，改配置区的 `ELECTRICIAN_KEYWORD` / `CONSTRUCTION_VALUE`
+即可，不需要动代码。
+
+### 两个核对文件
+
+跑完先看这两个，确认匹配规则和你的数据写法一致：
+
+```
+matched_occupation_values.csv     被判为电工的职业原文 + 各自行数
+electrician_industry_values.csv   这些电工所在行业的原文 + 行数 + 被归到哪一组
+```
+
+控制台也会直接打印，例如：
+
+```
+电工所在行业的原文取值（共 8 种）
+                Census2018_Industry  n_electricians       counted_as
+                       Construction              82     Construction
+                             (空白)                34          Unknown
+                       Retail trade              15 Non_construction
+                            Unknown               8          Unknown
+```
+
+`counted_as` 的各组合计与实际输出文件行数逐项对账（测试有断言）。
+
+匹配不上时会明确告警：一个电工都没匹配到会提示「这一列可能存的是数字码而不是
+文字」；没有任何行业等于 Construction 会把实际出现的行业写法列出来让你对照。
+
+### 另外两点
 
 - **`All_industry` 是并集，行会重复出现**：同一名电工既在 All 文件里，也在它所属的
-  行业组文件里。这是设计如此，让 All 文件能独立作为「全部电工」使用。脚本每次运行
-  都核对 `All = Construction + Non_construction + Unknown_industry` 并打印。
-- **行业未知的电工默认单独成组，不并入对照组**。做 construction vs non-construction
-  对比时，把行业未知的人塞进对照组会污染对照组 —— 他们当中可能就有建筑业电工。
-  要合并改 `UNKNOWN_INDUSTRY_GOES_TO = "nonconstruction"`。
-- **列名解析防串台**：`Census2018_Industry` 归一化后是 `census2018industry`，
-  **包含**职业列的候选词 `census2018`。脚本先认行业列并把它排除在职业列搜索之外，
-  职业列搜索还会跳过任何含 `industry` 的列名。缺任何一列会报错并点名，不会拿另一列
-  顶替（测试里专门验了这条）。
-
-电工码默认只有 **6330（Electricians）**。这三类**不在**默认范围内，需要自行加进
-`ELECTRICIAN_CODES`：`6600` Helpers, construction trades（电工帮工并入了这个总类，
-无法单独拆出）、电力线路安装维修工、电气电子维修工（后两类属于 Installation,
-Maintenance and Repair 大类 7000–7640，不是 Electricians）。
+  行业组文件里。这是设计如此，每次运行都核对
+  `All = Construction + Non_construction + Unknown_industry`。
+- **行业未知的电工默认单独成组**，不并入对照组 —— 做 construction vs
+  non-construction 对比时，把行业未知的人塞进对照组会污染对照组。要合并改
+  `UNKNOWN_INDUSTRY_GOES_TO = "nonconstruction"`。
 
 ## 一键脚本（填空即用）：`run_construction_split.py`
 

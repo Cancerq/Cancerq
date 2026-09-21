@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""从年龄段 CSV 中筛出电工，再按行业交叉分成三组。
+"""从年龄段 CSV 中筛出电工，再按行业分组。判断只看两列的文本内容：
 
-  Construction_electrician      职业=电工 且 行业=Construction(0770)
-  Non_construction_electrician  职业=电工 且 行业=其他已知行业
-  All_industry_electrician      职业=电工（不分行业，= 上面各组之和）
+    是电工    = Census2018_Occupation 里含有 "Electrician"
+    是建筑业  = Census2018_Industry   等于 "Construction"
 
-电工是【职业】码 Census2018_Occupation = 6330；
-Construction 是【行业】码 Census2018_Industry = 0770。两列缺一不可。
+不做任何行业码段推断，不查码表。
 
-注意 All_industry_electrician 是并集，同一行会同时出现在 All 文件和它所属的
-行业组文件里 —— 这是设计如此，不是重复写入。脚本会明确核对：
-    All = Construction + Non_construction + Unknown_industry
+输出四组：
+    Construction_electrician      是电工 且 行业 = Construction
+    Non_construction_electrician  是电工 且 行业 = 其他已填写的行业
+    Unknown_industry_electrician  是电工 且 行业 为空 / Unknown
+    All_industry_electrician      是电工（不分行业，= 上面三组之和）
 
-每组都产出【年龄分层】和【合并】两套结果。
+All_industry 是并集，同一行会同时出现在 All 和它所属的行业组里 —— 设计如此。
+每次运行都核对 All = Construction + Non_construction + Unknown_industry。
 
-用法：把下面「配置区」的 INPUT_DIR 填好（OUTPUT_DIR 已预填），然后运行
+每组都产出【年龄分层】和【合并】两套结果。单文件，只依赖 pandas。
+
+用法：把「配置区」的 INPUT_DIR 填好（OUTPUT_DIR 已预填），然后运行
 
     python run_electrician_split.py
 """
@@ -28,168 +31,6 @@ import sys
 from pathlib import Path
 
 import pandas as pd
-
-# =============================================================================
-# 单文件自带：Census 2018 码表与解析工具（无需其他 .py 文件，只依赖 pandas）
-#
-# 这一段原本是 census_2018.py / census_2018_industry.py 两个模块，内联进来是为了
-# 让本脚本可以单独拷到任何机器上直接运行。仓库里的测试会核对这里的码段与那两个
-# 模块完全一致，所以不会出现两处定义不同步的情况。
-# =============================================================================
-
-# --- 职业码（Census2018_Occupation）---------------------------------------
-ELECTRICIANS = 6330                       # Electricians
-OCC_COL_CANDIDATES = (
-    "census2018occupation", "census2018occ", "census2018",
-    "censusoccupation2018", "occupationcensus2018", "occ2018",
-)
-OCCUPATION_TITLES = {
-    6200: "First-line supervisors of construction trades and extraction workers",
-    6230: "Carpenters",
-    6260: "Construction laborers",
-    6320: "Drywall installers, ceiling tile installers, and tapers",
-    6330: "Electricians",
-    6441: "Plumbers, pipefitters, and steamfitters",
-    6515: "Roofers",
-    6540: "Solar photovoltaic installers",
-    6600: "Helpers, construction trades",
-    6765: "Other construction and related workers",
-}
-
-# --- 行业码（Census2018_Industry）------------------------------------------
-# 行业码表里 Construction 是【单个码】0770，不是区间。采矿是另一个大类。
-CONSTRUCTION_INDUSTRY = (770, 770)
-MINING_INDUSTRY = (370, 490)
-IND_COL_CANDIDATES = (
-    "census2018industry", "censusindustry2018", "industrycensus2018",
-    "census2018ind", "industry2018", "ind2018",
-)
-# 行业大类名称，仅用于 breakdown 显示。筛选只依据上面的数值码段，
-# 所以名称不全也绝不会改变你拿到的行。
-INDUSTRY_SECTORS = [
-    ((170, 290), "Agriculture, forestry, fishing and hunting"),
-    ((370, 490), "Mining, quarrying, and oil and gas extraction"),
-    ((570, 690), "Utilities"),
-    ((770, 770), "Construction"),
-    ((1070, 3990), "Manufacturing"),
-    ((4070, 4590), "Wholesale trade"),
-    ((4670, 5790), "Retail trade"),
-    ((6070, 6390), "Transportation and warehousing"),
-    ((6470, 6780), "Information"),
-    ((6870, 6992), "Finance and insurance"),
-    ((7071, 7190), "Real estate and rental and leasing"),
-    ((7270, 7490), "Professional, scientific, and technical services"),
-    ((7570, 7570), "Management of companies and enterprises"),
-    ((7580, 7790), "Administrative, support and waste management services"),
-    ((7860, 7890), "Educational services"),
-    ((7970, 8470), "Health care and social assistance"),
-    ((8561, 8590), "Arts, entertainment, and recreation"),
-    ((8660, 8690), "Accommodation and food services"),
-    ((8770, 9290), "Other services, except public administration"),
-    ((9370, 9590), "Public administration"),
-    ((9670, 9870), "Military"),
-    ((9920, 9920), "Unemployed, with no work experience or never worked"),
-]
-
-BLANK = "BLANK"
-UNPARSEABLE = "UNPARSEABLE"
-MISSING_TOKENS = {"", ".", "-", "--", "nan", "none", "null", "<na>"}
-
-
-def norm_value(value) -> str:
-    """小写、压缩空白；缺失值返回空字符串。"""
-    if value is None:
-        return ""
-    try:
-        if pd.isna(value):
-            return ""
-    except (TypeError, ValueError):
-        pass
-    text = re.sub(r"\s+", " ", str(value)).strip().lower()
-    return "" if text in MISSING_TOKENS else text
-
-
-def norm_colname(name: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", str(name).lower())
-
-
-def parse_code(value) -> "int | str":
-    """把码值解析成整数，或 BLANK / UNPARSEABLE。
-
-    接受 "6330"、"06330"、"6330.0"、6330。非数字一律不猜，返回 UNPARSEABLE。
-    """
-    text = norm_value(value)
-    if not text:
-        return BLANK
-    match = re.fullmatch(r"(\d{1,5})(?:\.0+)?", text)
-    return int(match.group(1)) if match else UNPARSEABLE
-
-
-def in_ranges(code: int, ranges) -> bool:
-    return any(low <= code <= high for low, high in ranges)
-
-
-def build_construction_ranges(include_mining: bool = False):
-    ranges = [CONSTRUCTION_INDUSTRY]
-    if include_mining:
-        ranges.append(MINING_INDUSTRY)
-    return sorted(ranges)
-
-
-def describe_ranges(ranges) -> str:
-    return ", ".join(
-        f"{low:04d}" if low == high else f"{low:04d}-{high:04d}" for low, high in ranges
-    )
-
-
-def sector_of(code) -> str:
-    if not isinstance(code, int):
-        return ""
-    for (low, high), name in INDUSTRY_SECTORS:
-        if low <= code <= high:
-            return name
-    return ""
-
-
-def occupation_title(code) -> str:
-    return OCCUPATION_TITLES.get(code, "") if isinstance(code, int) else ""
-
-
-def find_industry_column(columns, exclude=()):
-    excluded = set(exclude)
-    normalised = {norm_colname(c): c for c in columns if c not in excluded}
-    for cand in IND_COL_CANDIDATES:
-        if cand in normalised:
-            return normalised[cand]
-    for cand in IND_COL_CANDIDATES:
-        for norm, original in normalised.items():
-            if cand in norm:
-                return original
-    return None
-
-
-def find_occupation_column(columns, exclude=()):
-    """找职业码列，绝不会返回行业列。
-
-    "Census2018_Industry" 归一化后是 "census2018industry"，【包含】职业列的候选词
-    "census2018"。没有这道防护，子串匹配会把行业列当成职业列，导致每个码都对着
-    错误的码表解释。
-    """
-    excluded = set(exclude)
-    normalised = {
-        norm_colname(c): c
-        for c in columns
-        if c not in excluded and "industry" not in norm_colname(c)
-    }
-    for cand in OCC_COL_CANDIDATES:
-        if cand in normalised:
-            return normalised[cand]
-    for cand in OCC_COL_CANDIDATES:
-        for norm, original in normalised.items():
-            if cand in norm:
-                return original
-    return None
-
 
 # =============================================================================
 # 配置区
@@ -221,22 +62,27 @@ OUTPUT_DIR = (
 OCCUPATION_COL = r""
 INDUSTRY_COL = r""
 
-# 电工的 Census 2018 职业码。6330 = Electricians。
-# 注意这三类【不在】默认范围内，需要时自行加入：
-#   6600  Helpers, construction trades（电工帮工并入了这个总类，无法单独拆出）
-#   电力线路安装维修工 / 电气电子维修工 属于 Installation, Maintenance and Repair
-#   大类（7000-7640），不是 Electricians
-ELECTRICIAN_CODES = [ELECTRICIANS]   # 6330
+# 电工：职业列里【含有】这个词就算（不区分大小写）。
+# "electrician" 能同时匹配 "Electricians"、"Electrician, apprentice" 等写法。
+ELECTRICIAN_KEYWORD = "electrician"
 
-# 行业未知（码为空或读不出）的电工怎么处理：
+# 建筑业：行业列【等于】这个值才算（不区分大小写、忽略首尾空格）。
+# 用等于而不是包含，避免误匹配到其他含该词的行业名称。
+CONSTRUCTION_VALUE = "construction"
+
+# 行业未知（空白，或下面 UNKNOWN_INDUSTRY_VALUES 里的写法）的电工怎么处理：
 #   "separate"        -> 单独写 Unknown_industry_electrician（默认）
 #   "nonconstruction" -> 并入 Non_construction_electrician
 # 做 construction vs non-construction 对比时，把行业未知的人塞进对照组会污染
-# 对照组 —— 他们当中可能就有建筑业电工。确认要合并再改。
+# 对照组 —— 他们当中可能就有建筑业电工。
 UNKNOWN_INDUSTRY_GOES_TO = "separate"
 
-# 是否把采矿业（0370-0490）也算作 construction 行业
-INCLUDE_MINING = False
+# 行业列里代表「未知」的写法（整格匹配，不区分大小写）
+UNKNOWN_INDUSTRY_VALUES = [
+    "unknown", "unk", "not available", "not specified", "not stated",
+    "not reported", "unspecified", "missing", "refused", "n/a", "na", "none",
+    "blank", "未知",
+]
 
 ENCODING = "utf-8"
 CHUNK_SIZE = 50_000
@@ -252,6 +98,7 @@ GROUPS = (
     "Unknown_industry_electrician",
 )
 
+# 目录扫描时跳过的非样本文件
 SKIP_NAME_PATTERNS = (
     re.compile(r"age_distribution", re.I),
     re.compile(r"_excluded", re.I),
@@ -259,22 +106,92 @@ SKIP_NAME_PATTERNS = (
     re.compile(r"^summary", re.I),
     re.compile(r"^file_map", re.I),
     re.compile(r"breakdown", re.I),
+    re.compile(r"_values\.csv$", re.I),
 )
 
 AGE_BAND_RE = re.compile(r"(\d{2})[_\-](\d{2})")
+
+# 统计表里代表「原本是空格子」的占位符。必须和真实取值区分开，否则
+# counted_as 会把空白错标成 Non_construction。
+BLANK_LABEL = "(空白)"
+
+# 这些取值视同空白
+MISSING_TOKENS = {"", ".", "-", "--", "nan", "none", "null", "<na>"}
+
+OCC_COL_CANDIDATES = (
+    "census2018occupation", "census2018occ", "occupation2018",
+    "censusoccupation2018", "occupationcensus2018", "occupation",
+)
+IND_COL_CANDIDATES = (
+    "census2018industry", "censusindustry2018", "industrycensus2018",
+    "census2018ind", "industry2018", "industry",
+)
+
+
+def norm_text(value) -> str:
+    """小写、压缩空白、去首尾空格；缺失值返回空字符串。"""
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    text = re.sub(r"\s+", " ", str(value)).strip().lower()
+    return "" if text in MISSING_TOKENS else text
+
+
+def norm_colname(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(name).lower())
 
 
 def band_of(path: Path) -> tuple[str, str]:
     """(显示用 '18-27', 文件名用 '18_27')"""
     m = AGE_BAND_RE.search(path.stem)
-    return (f"{m.group(1)}-{m.group(2)}", f"{m.group(1)}_{m.group(2)}") if m else (
-        path.stem, path.stem
-    )
+    if m:
+        return f"{m.group(1)}-{m.group(2)}", f"{m.group(1)}_{m.group(2)}"
+    return path.stem, path.stem
 
 
 def fail(message: str) -> "NoReturn":  # noqa: F821
     print(f"\n错误：{message}\n", file=sys.stderr)
     sys.exit(2)
+
+
+def find_industry_column(columns, exclude=()):
+    excluded = set(exclude)
+    normalised = {norm_colname(c): c for c in columns if c not in excluded}
+    for cand in IND_COL_CANDIDATES:
+        if cand in normalised:
+            return normalised[cand]
+    for cand in IND_COL_CANDIDATES:
+        for norm, original in normalised.items():
+            if cand in norm:
+                return original
+    return None
+
+
+def find_occupation_column(columns, exclude=()):
+    """找职业列，绝不会返回行业列。
+
+    "Census2018_Industry" 归一化后是 "census2018industry"。若职业候选词里有较短的
+    前缀，子串匹配可能把行业列当成职业列，那样两个判断都会落在同一列上。这里显式
+    排除任何列名含 "industry" 的列。
+    """
+    excluded = set(exclude)
+    normalised = {
+        norm_colname(c): c
+        for c in columns
+        if c not in excluded and "industry" not in norm_colname(c)
+    }
+    for cand in OCC_COL_CANDIDATES:
+        if cand in normalised:
+            return normalised[cand]
+    for cand in OCC_COL_CANDIDATES:
+        for norm, original in normalised.items():
+            if cand in norm:
+                return original
+    return None
 
 
 def resolve_inputs(input_dir: str, input_files: list[str]) -> list[Path]:
@@ -344,13 +261,6 @@ def resolve_output(output_dir: str) -> Path:
 
 
 def resolve_columns(columns, occ_override: str, ind_override: str) -> tuple[str, str]:
-    """Locate the occupation and industry columns, each claimed once.
-
-    Industry is resolved first and excluded from the occupation search: the
-    normalised name "census2018industry" contains the occupation candidate
-    "census2018", so without that the industry column could be read as
-    occupation and every code checked against the wrong list.
-    """
     if ind_override and ind_override.strip():
         industry = ind_override.strip()
         if industry not in columns:
@@ -371,9 +281,9 @@ def resolve_columns(columns, occ_override: str, ind_override: str) -> tuple[str,
 
     missing = []
     if not occupation:
-        missing.append("Census2018_Occupation（职业码，用来找电工 6330）")
+        missing.append("Census2018_Occupation（职业，用来找 Electrician）")
     if not industry:
-        missing.append("Census2018_Industry（行业码，用来判断是否 Construction 0770）")
+        missing.append("Census2018_Industry（行业，用来判断是否 Construction）")
     if missing:
         fail(
             "缺少必需的列：\n  - " + "\n  - ".join(missing)
@@ -421,9 +331,10 @@ def run(
     *,
     occupation_col: str = "",
     industry_col: str = "",
-    electrician_codes=(6330,),
+    electrician_keyword: str = ELECTRICIAN_KEYWORD,
+    construction_value: str = CONSTRUCTION_VALUE,
+    unknown_industry_values=tuple(UNKNOWN_INDUSTRY_VALUES),
     unknown_industry_goes_to: str = "separate",
-    include_mining: bool = False,
     encoding: str = "utf-8",
     chunk_size: int = 50_000,
 ) -> dict:
@@ -432,13 +343,16 @@ def run(
             "UNKNOWN_INDUSTRY_GOES_TO 只能是 \"separate\" 或 \"nonconstruction\"，"
             f"现在是 {unknown_industry_goes_to!r}"
         )
-    elec = {int(c) for c in electrician_codes}
-    if not elec:
-        fail("ELECTRICIAN_CODES 是空的，至少要有一个码（默认 6330）")
+    keyword = norm_text(electrician_keyword)
+    if not keyword:
+        fail("ELECTRICIAN_KEYWORD 是空的")
+    constr = norm_text(construction_value)
+    if not constr:
+        fail("CONSTRUCTION_VALUE 是空的")
+    unknown_set = {norm_text(v) for v in unknown_industry_values} - {""}
 
     files = resolve_inputs(input_dir, input_files)
     out_dir = resolve_output(output_dir)
-    constr_ranges = build_construction_ranges(include_mining)
     separate_unknown = unknown_industry_goes_to == "separate"
     groups = [g for g in GROUPS if separate_unknown or g != "Unknown_industry_electrician"]
 
@@ -447,11 +361,10 @@ def run(
     for path in files:
         print(f"  [{band_of(path)[0]:>5}] {path}  ({path.stat().st_size / 1048576:,.0f} MB)")
     print(f"\n输出目录：{out_dir}")
-    print(f"\n电工（职业码 Census2018_Occupation）：{sorted(elec)}"
-          f"  -> {', '.join(occupation_title(c) or '?' for c in sorted(elec))}")
-    print(f"Construction（行业码 Census2018_Industry）：{describe_ranges(constr_ranges)}")
-    print(f"  采矿 0370-0490 : {'计入' if include_mining else '不计入'}")
-    print(f"  行业未知的电工 : "
+    print("\n判断规则（只看这两列的文本内容）：")
+    print(f"  是电工   ：职业列 含有 {electrician_keyword!r}（不区分大小写）")
+    print(f"  是建筑业 ：行业列 等于 {construction_value!r}（不区分大小写）")
+    print(f"  行业未知 ："
           f"{'单独成组' if separate_unknown else '并入 Non_construction_electrician'}")
     print("=" * 78)
 
@@ -459,7 +372,8 @@ def run(
     merged_columns = None
     summary_rows: list[dict] = []
     rows_map: list[dict] = []
-    industry_counts: dict[object, int] = {}
+    industry_counts: dict[str, int] = {}
+    occupation_counts: dict[str, int] = {}
     total_read = 0
 
     for path in files:
@@ -486,21 +400,23 @@ def run(
             path, dtype=str, keep_default_na=True, encoding=encoding, chunksize=chunk_size
         ):
             n_read += len(chunk)
-            occ_codes = chunk[occ_col].map(parse_code)
-            is_elec = occ_codes.map(lambda c: isinstance(c, int) and c in elec)
+            occ_text = chunk[occ_col].map(norm_text)
+            is_elec = occ_text.str.contains(keyword, regex=False, na=False)
             electricians = chunk.loc[is_elec]
             if electricians.empty:
                 continue
             n_elec += len(electricians)
 
-            ind_codes = electricians[ind_col].map(parse_code)
-            for value, n in ind_codes.value_counts().items():
+            # 记下匹配到的职业原文，方便核对关键词有没有匹配过宽
+            for value, n in electricians[occ_col].fillna(BLANK_LABEL).value_counts().items():
+                occupation_counts[value] = occupation_counts.get(value, 0) + int(n)
+            # 记下这些电工所在行业的原文，方便核对 Construction 的写法
+            for value, n in electricians[ind_col].fillna(BLANK_LABEL).value_counts().items():
                 industry_counts[value] = industry_counts.get(value, 0) + int(n)
 
-            is_constr = ind_codes.map(
-                lambda c: isinstance(c, int) and in_ranges(c, constr_ranges)
-            )
-            is_unknown = ind_codes.isin([BLANK, UNPARSEABLE])
+            ind_text = electricians[ind_col].map(norm_text)
+            is_constr = ind_text == constr
+            is_unknown = (ind_text == "") | ind_text.isin(unknown_set)
 
             if separate_unknown:
                 buckets = {
@@ -522,17 +438,15 @@ def run(
                 if subset.empty:
                     continue
                 subset["electrician_group"] = group
-                subset = subset[out_columns]
-                strat[group].write(subset)
-                merged[group].write(subset)
+                strat[group].write(subset[out_columns])
+                merged[group].write(subset[out_columns])
 
-            # All_industry is the union; the same rows are written again here
-            # on purpose, so the file stands alone as "every electrician".
+            # All_industry 是并集，这里再写一遍同样的行是有意为之，
+            # 让 All 文件能独立作为「全部电工」使用。
             allrows = base.copy()
             allrows["electrician_group"] = "All_industry_electrician"
-            allrows = allrows[out_columns]
-            strat["All_industry_electrician"].write(allrows)
-            merged["All_industry_electrician"].write(allrows)
+            strat["All_industry_electrician"].write(allrows[out_columns])
+            merged["All_industry_electrician"].write(allrows[out_columns])
 
         counts = {g: strat[g].rows for g in groups}
         for group in groups:
@@ -574,19 +488,33 @@ def run(
 
     summary = pd.DataFrame(summary_rows)
     summary.to_csv(out_dir / "summary_by_age_band.csv", index=False)
-    file_map = pd.DataFrame(rows_map)
-    file_map.to_csv(out_dir / "file_map.csv", index=False)
+    pd.DataFrame(rows_map).to_csv(out_dir / "file_map.csv", index=False)
 
-    breakdown = pd.DataFrame([
-        {
-            "Census2018_Industry": str(v),
-            "sector": sector_of(v),
-            "n_electricians": n,
-            "is_construction": isinstance(v, int) and in_ranges(v, constr_ranges),
-        }
-        for v, n in sorted(industry_counts.items(), key=lambda kv: str(kv[0]))
-    ])
-    breakdown.to_csv(out_dir / "electrician_industry_breakdown.csv", index=False)
+    def bucket_of(value: str) -> str:
+        if value == BLANK_LABEL:      # 占位符代表空格子 -> 行业未知
+            return "Unknown" if separate_unknown else "Non_construction"
+        text = norm_text(value)
+        if text == constr:
+            return "Construction"
+        if text == "" or text in unknown_set:
+            return "Unknown" if separate_unknown else "Non_construction"
+        return "Non_construction"
+
+    ind_breakdown = pd.DataFrame(
+        [
+            {"Census2018_Industry": v, "n_electricians": n, "counted_as": bucket_of(v)}
+            for v, n in sorted(industry_counts.items(), key=lambda kv: -kv[1])
+        ],
+        columns=["Census2018_Industry", "n_electricians", "counted_as"],
+    )
+    ind_breakdown.to_csv(out_dir / "electrician_industry_values.csv", index=False)
+
+    occ_breakdown = pd.DataFrame(
+        [{"Census2018_Occupation": v, "n": n}
+         for v, n in sorted(occupation_counts.items(), key=lambda kv: -kv[1])],
+        columns=["Census2018_Occupation", "n"],
+    )
+    occ_breakdown.to_csv(out_dir / "matched_occupation_values.csv", index=False)
 
     # ---- 报告 --------------------------------------------------------------
     print("\n" + "=" * 78)
@@ -606,9 +534,7 @@ def run(
         print(f"  {'':<30} {merged[group].path}")
 
     n_all = merged["All_industry_electrician"].rows
-    n_parts = sum(
-        merged[g].rows for g in groups if g != "All_industry_electrician"
-    )
+    n_parts = sum(merged[g].rows for g in groups if g != "All_industry_electrician")
     print(f"\n读入总行数：{total_read:,}")
     print(f"电工总数（All_industry）：{n_all:,}")
     print(f"各行业组之和：{n_parts:,}")
@@ -619,13 +545,37 @@ def run(
         print(f"  警告：对不上，差 {n_all - n_parts:,} 行")
     print("  注意：All_industry 是并集，同一行也出现在它所属的行业组文件里。")
 
-    if separate_unknown:
-        n_unknown = merged["Unknown_industry_electrician"].rows
-        if n_unknown:
+    # ---- 匹配情况核对 -------------------------------------------------------
+    if n_all == 0:
+        occ_name = summary["occupation_column"].iloc[0] if not summary.empty else "职业列"
+        print(
+            f"\n  警告：一个电工都没匹配到。{occ_name!r} 里没有含 "
+            f"{electrician_keyword!r} 的值。\n"
+            "  如果这一列存的是数字码而不是文字，本脚本的判断方式不适用。"
+        )
+    else:
+        print("\n" + "=" * 78)
+        print(f"匹配到的职业原文（共 {len(occ_breakdown)} 种，确认关键词没匹配过宽）")
+        print("=" * 78)
+        print(occ_breakdown.head(20).to_string(index=False))
+
+        print("\n" + "=" * 78)
+        print(f"电工所在行业的原文取值（共 {len(ind_breakdown)} 种）")
+        print("=" * 78)
+        print(ind_breakdown.head(25).to_string(index=False))
+        if merged["Construction_electrician"].rows == 0:
             print(
-                f"\n  提醒：{n_unknown:,} 名电工的行业码为空或读不出，单独成组。"
-                "把他们并进 Non_construction 会污染对照组（其中可能就有建筑业电工）。"
+                f"\n  警告：没有任何电工的行业等于 {construction_value!r}。"
+                "\n  上表就是实际出现的行业写法。如果建筑业在你的数据里写作别的文字，"
+                "\n  把 CONSTRUCTION_VALUE 改成那个写法（大小写和首尾空格不影响）。"
             )
+
+    if separate_unknown and merged["Unknown_industry_electrician"].rows:
+        print(
+            f"\n  提醒：{merged['Unknown_industry_electrician'].rows:,} 名电工行业未知，"
+            "单独成组。把他们并进 Non_construction 会污染对照组"
+            "（其中可能就有建筑业电工）。"
+        )
 
     print("\n" + "=" * 78)
     print("输入文件 -> 输出文件 对照")
@@ -640,11 +590,14 @@ def run(
     print("\n另外写出：")
     print(f"  {out_dir / 'summary_by_age_band.csv'}")
     print(f"  {out_dir / 'file_map.csv'}")
-    print(f"  {out_dir / 'electrician_industry_breakdown.csv'}")
+    print(f"  {out_dir / 'electrician_industry_values.csv'}   电工所在行业的原文取值")
+    print(f"  {out_dir / 'matched_occupation_values.csv'}     匹配到的职业原文")
 
     return {
         "input_files": files, "output_dir": out_dir,
-        "summary": summary, "file_map": file_map, "breakdown": breakdown,
+        "summary": summary,
+        "industry_values": ind_breakdown,
+        "occupation_values": occ_breakdown,
         "merged_rows": {g: merged[g].rows for g in groups},
         "rows_read": total_read,
     }
@@ -652,18 +605,18 @@ def run(
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
-        description="筛出电工并按行业分成 Construction / Non-construction / All industry"
+        description="按文本判断筛出电工并分成 Construction / Non-construction / All industry"
     )
     parser.add_argument("--input-dir", default=None)
     parser.add_argument("--input", nargs="+", default=None)
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--occupation-col", default=None)
     parser.add_argument("--industry-col", default=None)
-    parser.add_argument("--electrician-codes", nargs="+", type=int, default=None)
+    parser.add_argument("--electrician-keyword", default=None)
+    parser.add_argument("--construction-value", default=None)
     parser.add_argument(
         "--unknown-industry-goes-to", choices=["separate", "nonconstruction"], default=None
     )
-    parser.add_argument("--include-mining", action="store_true", default=None)
     parser.add_argument("--encoding", default=None)
     parser.add_argument("--chunk-size", type=int, default=None)
     args = parser.parse_args(argv)
@@ -675,11 +628,11 @@ def main(argv=None) -> int:
         pick(args.output_dir, OUTPUT_DIR),
         occupation_col=pick(args.occupation_col, OCCUPATION_COL),
         industry_col=pick(args.industry_col, INDUSTRY_COL),
-        electrician_codes=pick(args.electrician_codes, ELECTRICIAN_CODES),
+        electrician_keyword=pick(args.electrician_keyword, ELECTRICIAN_KEYWORD),
+        construction_value=pick(args.construction_value, CONSTRUCTION_VALUE),
         unknown_industry_goes_to=pick(
             args.unknown_industry_goes_to, UNKNOWN_INDUSTRY_GOES_TO
         ),
-        include_mining=pick(args.include_mining, INCLUDE_MINING),
         encoding=pick(args.encoding, ENCODING),
         chunk_size=pick(args.chunk_size, CHUNK_SIZE),
     )

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""把年龄段 CSV 按 census_2018 分成 construction / 非 construction。
+"""把年龄段 CSV 按 census2018_industry 分成 construction / 非 construction。
 
 同时产出两套结果：
   1. 年龄分层：每个年龄段各一对文件
@@ -28,15 +28,9 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from census_2018 import (  # noqa: E402
-    BLANK,
-    CENSUS_2018_COL_CANDIDATES,
-    UNPARSEABLE,
-    build_construction_ranges,
-    describe_ranges,
-    in_ranges,
-    parse_code,
-)
+import census_2018 as occ            # noqa: E402  职业码（备选模式）
+import census_2018_industry as ind    # noqa: E402  行业码（默认模式）
+from census_2018 import BLANK, UNPARSEABLE, in_ranges, parse_code  # noqa: E402
 from nvdrs_split import _norm_colname  # noqa: E402
 
 # =============================================================================
@@ -65,20 +59,30 @@ OUTPUT_DIR = r""         # 例：r"D:\NVDRS\construction_out"
 # 以下为可选项，通常不用改
 # -----------------------------------------------------------------------------
 
-# census_2018 列名。留空 = 自动识别
+# 按哪套 Census 2018 码表划分 construction：
+#   "industry"   -> census2018_industry（雇主属于哪个行业。0770 = Construction）
+#   "occupation" -> census_2018（本人做什么工种。6200-6765 = 建筑工种）
+# 两者选出的人不一样：建筑公司的会计属于 industry 不属于 occupation；
+# 受雇于学校的木匠属于 occupation 不属于 industry。
+CLASSIFY_BY = "industry"
+
+# 码值所在的列名。留空 = 按 CLASSIFY_BY 自动识别
 CENSUS_COL = r""
 
-# 空白 census_2018 的行怎么处理：
-#   "separate"        -> 单独写 *_blank.csv（默认，推荐）
+# 码为空、或码读不出来（非数字）的行怎么处理。这两种都是「行业未知」：
+#   "separate"        -> 单独写 *_unknown.csv（默认，推荐）
 #   "nonconstruction" -> 并入非 construction
-# 空白是「不知道职业」，和「知道且不是建筑」不是一回事，合并会让非建筑组的分母
-# 变大。确认你的分析要把未知也算作非建筑，再改成 "nonconstruction"。
-BLANK_GOES_TO = "separate"
+# 「未知」和「已知不是建筑」不是一回事，合并会让非建筑组的分母变大。确认你的
+# 分析要把未知也算作非建筑，再改成 "nonconstruction"。
+UNKNOWN_GOES_TO = "separate"
 
-# 是否把采掘业（6800-6950）算作 construction
+# 是否把采矿/采掘算作 construction
+#   industry 模式：0370-0490（Mining, quarrying, and oil and gas extraction）
+#   occupation 模式：6800-6950（Extraction workers）
 INCLUDE_EXTRACTION = False
 
-# 是否把建筑经理（0220）算作 construction
+# 只在 occupation 模式有意义：是否把建筑经理（0220）算作 construction。
+# industry 模式下会被忽略（行业码里没有「经理」这个概念）。
 INCLUDE_MANAGERS = False
 
 # 输入文件编码。NVDRS 的 Windows 导出常见 "utf-8" 或 "cp1252"
@@ -186,7 +190,13 @@ def resolve_output(output_dir: str) -> Path:
     return path
 
 
-def find_census_column(columns, override: str = "") -> str:
+def find_census_column(columns, classify_by: str, override: str = "") -> str:
+    """Locate the code column for the active mode.
+
+    Crucially, industry mode will not fall back to an occupation column (or
+    the reverse): they are different code lists and 0770 means nothing in the
+    occupation list.
+    """
     if override and override.strip():
         name = override.strip()
         if name not in columns:
@@ -196,28 +206,47 @@ def find_census_column(columns, override: str = "") -> str:
             )
         return name
 
+    if classify_by == "industry":
+        wanted, other, label = ind.COL_CANDIDATES, occ.CENSUS_2018_COL_CANDIDATES, "行业"
+    else:
+        wanted, other, label = occ.CENSUS_2018_COL_CANDIDATES, ind.COL_CANDIDATES, "职业"
+
     normalised = {_norm_colname(c): c for c in columns}
-    for cand in CENSUS_2018_COL_CANDIDATES:
+    for cand in wanted:
         if cand in normalised:
             return normalised[cand]
-    for cand in CENSUS_2018_COL_CANDIDATES:
+    for cand in wanted:
         for norm, original in normalised.items():
             if cand in norm:
                 return original
 
+    # Say what we DID find, so the fix is obvious.
+    found_other = [
+        original
+        for norm, original in normalised.items()
+        if any(cand in norm for cand in other)
+    ]
     wrong_vintage = [
         original for norm, original in normalised.items()
         if "census" in norm and "2018" not in norm
     ]
     extra = ""
+    if found_other:
+        opposite = "occupation" if classify_by == "industry" else "industry"
+        extra += (
+            f"\n找到的是{'职业' if classify_by == 'industry' else '行业'}码列"
+            f"（{', '.join(found_other)}）。这是另一套码表，选出的人不一样，"
+            f"不能替代。要按它划分请把 CLASSIFY_BY 改成 \"{opposite}\"。"
+        )
     if wrong_vintage:
-        extra = (
-            f"\n注意：找到了其他年份的 census 列（{', '.join(wrong_vintage)}），"
-            "但 2010 和 2018 码表不通用，不能替代。"
+        extra += (
+            f"\n另外找到其他年份的 census 列（{', '.join(wrong_vintage)}），"
+            "2010 和 2018 码表不通用。"
         )
     fail(
-        "找不到 census_2018 列。"
-        f"{extra}\n请在配置区填 CENSUS_COL = r\"你的列名\"。"
+        f"CLASSIFY_BY = \"{classify_by}\"，但找不到对应的{label}码列"
+        f"（找过：{', '.join(wanted)}）。{extra}\n"
+        "请在配置区填 CENSUS_COL = r\"你的列名\"。"
     )
 
 
@@ -256,23 +285,35 @@ def run(
     input_files: list[str],
     output_dir: str,
     *,
+    classify_by: str = "industry",
     census_col: str = "",
-    blank_goes_to: str = "separate",
+    unknown_goes_to: str = "separate",
     include_extraction: bool = False,
     include_managers: bool = False,
     encoding: str = "utf-8",
     chunk_size: int = 50_000,
 ) -> dict:
-    if blank_goes_to not in {"separate", "nonconstruction"}:
+    if unknown_goes_to not in {"separate", "nonconstruction"}:
         fail(
-            f"BLANK_GOES_TO 只能是 \"separate\" 或 \"nonconstruction\"，"
-            f"现在是 {blank_goes_to!r}"
+            f"UNKNOWN_GOES_TO 只能是 \"separate\" 或 \"nonconstruction\"，"
+            f"现在是 {unknown_goes_to!r}"
+        )
+    if classify_by not in {"industry", "occupation"}:
+        fail(
+            f"CLASSIFY_BY 只能是 \"industry\" 或 \"occupation\"，现在是 {classify_by!r}"
         )
 
     files = resolve_inputs(input_dir, input_files)
     out_dir = resolve_output(output_dir)
-    ranges = build_construction_ranges(include_extraction, include_managers)
-    separate_blank = blank_goes_to == "separate"
+    if classify_by == "industry":
+        ranges = ind.build_construction_ranges(include_extraction)
+        describe = ind.describe_ranges
+        sector_of = ind.sector
+    else:
+        ranges = occ.build_construction_ranges(include_extraction, include_managers)
+        describe = occ.describe_ranges
+        sector_of = occ.title
+    separate_unknown = unknown_goes_to == "separate"
 
     print("=" * 78)
     print("输入文件：")
@@ -280,13 +321,24 @@ def run(
         size_mb = path.stat().st_size / 1024 / 1024
         print(f"  [{band_from_name(path):>5}] {path}  ({size_mb:,.0f} MB)")
     print(f"\n输出目录：{out_dir}")
-    print(f"\nconstruction 码段（Census 2018）：{describe_ranges(ranges)}")
-    print(f"  采掘业 6800-6950 : {'计入' if include_extraction else '不计入'}")
-    print(f"  建筑经理 0220    : {'计入' if include_managers else '不计入'}")
-    print(f"  空白 census_2018 : {'单独成文件' if separate_blank else '并入非 construction'}")
+    mode_label = (
+        "census2018_industry（行业：雇主属于哪个行业）"
+        if classify_by == "industry"
+        else "census_2018（职业：本人做什么工种）"
+    )
+    print(f"\n划分依据：{mode_label}")
+    print(f"construction 码：{describe(ranges)}")
+    if classify_by == "industry":
+        print(f"  采矿/采掘 0370-0490 : {'计入' if include_extraction else '不计入'}")
+        if include_managers:
+            print("  （INCLUDE_MANAGERS 在 industry 模式下无意义，已忽略）")
+    else:
+        print(f"  采掘工种 6800-6950 : {'计入' if include_extraction else '不计入'}")
+        print(f"  建筑经理 0220      : {'计入' if include_managers else '不计入'}")
+    print(f"  码为空/读不出 : {'单独成 unknown 文件' if separate_unknown else '并入非 construction'}")
     print("=" * 78)
 
-    groups = ["construction", "nonconstruction"] + (["blank"] if separate_blank else [])
+    groups = ["construction", "nonconstruction"] + (["unknown"] if separate_unknown else [])
 
     merged = {
         g: Writer(out_dir / f"all_ages_{g}.csv", encoding) for g in groups
@@ -300,7 +352,7 @@ def run(
         band = band_from_name(path)
         slug = band_slug(path)
         header = pd.read_csv(path, dtype=str, nrows=0, encoding=encoding)
-        column = find_census_column(header.columns, census_col)
+        column = find_census_column(header.columns, classify_by, census_col)
 
         out_columns = list(header.columns)
         for added in ("age_band", "occupation_group"):
@@ -316,7 +368,7 @@ def run(
             )
 
         strat = {g: Writer(out_dir / f"nvdrs_age_{slug}_{g}.csv", encoding) for g in groups}
-        n_read = n_bad = 0
+        n_read = n_bad = n_blank_file = 0
 
         reader = pd.read_csv(
             path, dtype=str, keep_default_na=True, encoding=encoding, chunksize=chunk_size
@@ -330,12 +382,15 @@ def run(
             is_blank = codes == BLANK
             n_read += len(chunk)
             n_bad += int((codes == UNPARSEABLE).sum())
+            n_blank_file += int(is_blank.sum())
 
-            if separate_blank:
+            is_bad = codes == UNPARSEABLE
+            if separate_unknown:
                 masks = {
                     "construction": is_constr,
-                    "blank": is_blank,
-                    "nonconstruction": ~(is_constr | is_blank),
+                    # blank and unreadable are both "industry unknown"
+                    "unknown": is_blank | is_bad,
+                    "nonconstruction": ~(is_constr | is_blank | is_bad),
                 }
             else:
                 masks = {
@@ -374,16 +429,18 @@ def run(
                 "rows_read": n_read,
                 "construction": counts["construction"],
                 "nonconstruction": counts["nonconstruction"],
-                "blank": counts.get("blank", 0),
+                "unknown": counts.get("unknown", 0),
+                "blank_code": n_blank_file,
                 "unparseable_code": n_bad,
-                "census_column": column,
+                "code_column": column,
+                "classify_by": classify_by,
             }
         )
         pct = counts["construction"] / n_read * 100 if n_read else 0.0
         print(
             f"  [{band:>5}] {n_read:,} 行 -> construction {counts['construction']:,}"
             f" ({pct:.2f}%), 非 construction {counts['nonconstruction']:,}"
-            + (f", 空白 {counts['blank']:,}" if separate_blank else "")
+            + (f", 未知 {counts['unknown']:,}" if separate_unknown else "")
         )
 
     for group in groups:
@@ -403,25 +460,28 @@ def run(
     file_map = pd.DataFrame(rows_map)
     file_map.to_csv(out_dir / "file_map.csv", index=False)
 
+    code_label = "census2018_industry" if classify_by == "industry" else "census_2018"
     breakdown = pd.DataFrame(
         [
             {
-                "census_2018": str(v),
+                code_label: str(v),
+                "sector" if classify_by == "industry" else "title": sector_of(v),
                 "n": n,
                 "is_construction": isinstance(v, int) and in_ranges(v, ranges),
             }
             for v, n in sorted(code_counts.items(), key=lambda kv: str(kv[0]))
         ]
     )
-    breakdown.to_csv(out_dir / "census_2018_breakdown.csv", index=False)
+    breakdown_name = f"{code_label}_breakdown.csv"
+    breakdown.to_csv(out_dir / breakdown_name, index=False)
 
     # ---- 报告 --------------------------------------------------------------
     print("\n" + "=" * 78)
     print("年龄分层结果")
     print("=" * 78)
     show = ["age_band", "rows_read", "construction", "nonconstruction"]
-    if separate_blank:
-        show.append("blank")
+    if separate_unknown:
+        show.append("unknown")
     print(summary[show].to_string(index=False))
 
     print("\n" + "=" * 78)
@@ -438,12 +498,14 @@ def run(
         print(f"  警告：数量对不上，差 {total_read - total_out:,} 行")
     else:
         print("  （读入 = 写出，没有行丢失或重复）")
-    if not separate_blank:
-        n_blank = int(breakdown.loc[breakdown["census_2018"] == BLANK, "n"].sum())
-        if n_blank:
+    if not separate_unknown:
+        n_unknown = int(
+            breakdown.loc[breakdown[code_label].isin([BLANK, UNPARSEABLE]), "n"].sum()
+        )
+        if n_unknown:
             print(
-                f"\n  提醒：{n_blank:,} 行的 census_2018 为空白，已按设置并入"
-                "非 construction。这些是「职业未知」而非「已知不是建筑」。"
+                f"\n  提醒：{n_unknown:,} 行的{code_label}为空或读不出，已按设置并入"
+                "非 construction。这些是「行业未知」而非「已知不是建筑」。"
             )
 
     print("\n" + "=" * 78)
@@ -459,7 +521,7 @@ def run(
     print(f"\n另外写出：")
     print(f"  {out_dir / 'summary_by_age_band.csv'}   各年龄段计数")
     print(f"  {out_dir / 'file_map.csv'}              输入->输出 路径对照表")
-    print(f"  {out_dir / 'census_2018_breakdown.csv'} 逐个码的行数")
+    print(f"  {out_dir / breakdown_name} 逐个码的行数（含行业/职业名称）")
 
     return {
         "input_files": files,
@@ -481,9 +543,13 @@ def main(argv=None) -> int:
     parser.add_argument("--input-dir", default=None, help="覆盖配置区的 INPUT_DIR")
     parser.add_argument("--input", nargs="+", default=None, help="覆盖配置区的 INPUT_FILES")
     parser.add_argument("--output-dir", default=None, help="覆盖配置区的 OUTPUT_DIR")
+    parser.add_argument(
+        "--classify-by", choices=["industry", "occupation"], default=None,
+        help="覆盖配置区的 CLASSIFY_BY（默认 industry）",
+    )
     parser.add_argument("--census-col", default=None, help="覆盖配置区的 CENSUS_COL")
     parser.add_argument(
-        "--blank-goes-to", choices=["separate", "nonconstruction"], default=None
+        "--unknown-goes-to", choices=["separate", "nonconstruction"], default=None
     )
     parser.add_argument("--include-extraction", action="store_true", default=None)
     parser.add_argument("--include-managers", action="store_true", default=None)
@@ -495,9 +561,10 @@ def main(argv=None) -> int:
         args.input_dir if args.input_dir is not None else INPUT_DIR,
         args.input if args.input is not None else INPUT_FILES,
         args.output_dir if args.output_dir is not None else OUTPUT_DIR,
+        classify_by=args.classify_by if args.classify_by is not None else CLASSIFY_BY,
         census_col=args.census_col if args.census_col is not None else CENSUS_COL,
-        blank_goes_to=(
-            args.blank_goes_to if args.blank_goes_to is not None else BLANK_GOES_TO
+        unknown_goes_to=(
+            args.unknown_goes_to if args.unknown_goes_to is not None else UNKNOWN_GOES_TO
         ),
         include_extraction=(
             args.include_extraction

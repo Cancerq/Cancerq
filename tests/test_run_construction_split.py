@@ -51,14 +51,21 @@ def expect_exit(fn, *a, **kw) -> str:
     return ""
 
 
-# code, expected group with default settings
+# Each row carries BOTH code lists, with the industry and occupation codes
+# deliberately disagreeing, so a test can prove which one drove the split.
+# (industry code, occupation code, expected group by INDUSTRY, by OCCUPATION)
 CODES = [
-    ("6200", "construction"), ("6230", "construction"), ("6765", "construction"),
-    ("6199", "nonconstruction"), ("6766", "nonconstruction"),
-    ("6800", "nonconstruction"), ("0220", "nonconstruction"),
-    ("3130", "nonconstruction"), ("9820", "nonconstruction"),
-    ("unknown", "nonconstruction"),
-    ("", "blank"),
+    ("0770", "3130", "construction", "nonconstruction"),   # 建筑公司的会计
+    ("0770", "6230", "construction", "construction"),      # 建筑公司的木匠
+    ("7860", "6230", "nonconstruction", "construction"),   # 学校雇的木匠
+    ("7970", "3130", "nonconstruction", "nonconstruction"),
+    ("0370", "6800", "nonconstruction", "nonconstruction"),  # 采矿，默认都不计入
+    ("4670", "4700", "nonconstruction", "nonconstruction"),
+    ("9370", "0220", "nonconstruction", "nonconstruction"),
+    ("0769", "6199", "nonconstruction", "nonconstruction"),  # 紧邻 0770 的下界
+    ("0771", "6766", "nonconstruction", "nonconstruction"),  # 紧邻 0770 的上界
+    ("unknown", "unknown", "unknown", "unknown"),   # 码读不出 = 行业未知
+    ("", "", "unknown", "unknown"),        # 码为空 = 行业未知
 ]
 
 
@@ -67,14 +74,16 @@ def build_inputs(directory: Path, reps: int = 4) -> None:
     for band in BANDS:
         rows = []
         for rep in range(reps):
-            for i, (code, expected) in enumerate(CODES):
+            for i, (industry, occupation, by_ind, by_occ) in enumerate(CODES):
                 rows.append(
                     {
                         "IncidentID": f"{band}-{rep}-{i}",
                         "Age": int(band.split("_")[0]) + 1,
-                        "census_2018": code,
+                        "census2018_industry": industry,
+                        "census_2018": occupation,
                         "circumstance_known_c": "Yes" if i % 2 else "No",
-                        "expected_group": expected,
+                        "expected_group": by_ind,
+                        "expected_group_by_occupation": by_occ,
                     }
                 )
         pd.DataFrame(rows).to_csv(directory / f"nvdrs_age_{band}.csv", index=False)
@@ -84,8 +93,10 @@ def build_inputs(directory: Path, reps: int = 4) -> None:
         directory / "age_distribution.csv", index=False
     )
     pd.DataFrame(
-        {"IncidentID": ["x"], "Age": [99], "census_2018": ["6230"],
-         "circumstance_known_c": ["Yes"], "expected_group": ["construction"]}
+        {"IncidentID": ["x"], "Age": [99], "census2018_industry": ["0770"],
+         "census_2018": ["6230"], "circumstance_known_c": ["Yes"],
+         "expected_group": ["construction"],
+         "expected_group_by_occupation": ["construction"]}
     ).to_csv(directory / "nvdrs_age_excluded.csv", index=False)
 
 
@@ -120,7 +131,7 @@ def main() -> int:
         print("\n-- age-stratified files --")
         strat_ids = []
         for band in BANDS:
-            for group in ("construction", "nonconstruction", "blank"):
+            for group in ("construction", "nonconstruction", "unknown"):
                 path = out / f"nvdrs_age_{band}_{group}.csv"
                 check(path.exists(), f"nvdrs_age_{band}_{group}.csv written")
                 part = pd.read_csv(path, dtype=str)
@@ -140,7 +151,7 @@ def main() -> int:
 
         print("\n-- merged files equal the concatenation of the strata --")
         merged_ids = []
-        for group in ("construction", "nonconstruction", "blank"):
+        for group in ("construction", "nonconstruction", "unknown"):
             merged = pd.read_csv(out / f"all_ages_{group}.csv", dtype=str)
             merged_ids.extend(merged["IncidentID"].tolist())
             parts = pd.concat(
@@ -188,23 +199,53 @@ def main() -> int:
         print("\n-- BLANK_GOES_TO = nonconstruction --")
         out2 = workdir / "out2"
         r2, o2 = quiet(rcs.run, str(data), [""] * 5, str(out2),
-                       blank_goes_to="nonconstruction", chunk_size=100)
-        check(not (out2 / "all_ages_blank.csv").exists(), "no blank file in that mode")
+                       unknown_goes_to="nonconstruction", chunk_size=100)
+        check(not (out2 / "all_ages_unknown.csv").exists(), "no unknown file in that mode")
         nonc = pd.read_csv(out2 / "all_ages_nonconstruction.csv", dtype=str)
-        check(len(nonc) == (7 + 1) * 4 * 5,
-              f"blanks folded into non-construction (got {len(nonc)})")
-        check("并入非 construction" in o2 and "职业未知" in o2,
-              "warns that blanks are unknown occupation, not known non-construction")
+        check(len(nonc) == 9 * 4 * 5,
+              f"unknowns folded into non-construction (got {len(nonc)})")
+        check("并入非 construction" in o2 and "行业未知" in o2,
+              "warns that unknowns are unknown industry, not known non-construction")
         check(r2["rows_read"] == r2["rows_written"] == total_rows,
               "still reconciles in that mode")
+
+        print("\n-- industry vs occupation pick DIFFERENT people --")
+        out_occ = workdir / "out_occ"
+        r_occ, o_occ = quiet(rcs.run, str(data), [""] * 5, str(out_occ),
+                             classify_by="occupation", chunk_size=100)
+        ind_ids = set(pd.read_csv(out / "all_ages_construction.csv", dtype=str)["IncidentID"])
+        occ_ids = set(
+            pd.read_csv(out_occ / "all_ages_construction.csv", dtype=str)["IncidentID"]
+        )
+        check(ind_ids != occ_ids,
+              "the two code lists select different construction cohorts")
+        check(
+            len(ind_ids - occ_ids) == 20,
+            f"industry-only (建筑公司的会计): {len(ind_ids - occ_ids)} rows",
+        )
+        check(
+            len(occ_ids - ind_ids) == 20,
+            f"occupation-only (学校雇的木匠): {len(occ_ids - ind_ids)} rows",
+        )
+        check(len(ind_ids & occ_ids) == 20, f"both: {len(ind_ids & occ_ids)} rows")
+
+        occ_df = pd.read_csv(out_occ / "all_ages_construction.csv", dtype=str)
+        check(
+            set(occ_df["expected_group_by_occupation"]) == {"construction"},
+            "occupation mode matches the occupation expectations",
+        )
+        check("census_2018（职业" in o_occ and "census2018_industry（行业" in output,
+              "each run states which code list it used")
+        check(r_occ["rows_read"] == r_occ["rows_written"] == total_rows,
+              "occupation mode also reconciles")
 
         print("\n-- include_extraction / include_managers --")
         out3 = workdir / "out3"
         r3, _ = quiet(rcs.run, str(data), [""] * 5, str(out3),
                       include_extraction=True, include_managers=True, chunk_size=100)
         c3 = pd.read_csv(out3 / "all_ages_construction.csv", dtype=str)
-        check({"6800", "0220"} <= set(c3["census_2018"]),
-              "6800 and 0220 counted as construction when enabled")
+        check("0370" in set(c3["census2018_industry"]),
+              "mining industry 0370 counted as construction with include_extraction")
         check(r3["rows_read"] == r3["rows_written"] == total_rows, "still reconciles")
 
         print("\n-- INPUT_FILES list instead of a directory --")
@@ -235,13 +276,14 @@ def main() -> int:
         print("\n-- a missing census_2018 column is explained --")
         bad_dir = workdir / "bad"
         bad_dir.mkdir()
-        pd.DataFrame({"IncidentID": ["1"], "census_2010": ["6230"]}).to_csv(
+        pd.DataFrame({"IncidentID": ["1"], "census_2018": ["6230"]}).to_csv(
             bad_dir / "nvdrs_age_18_27.csv", index=False
         )
         msg = expect_exit(rcs.run, str(bad_dir), [""] * 5, str(workdir / "o9"))
-        check("找不到 census_2018 列" in msg, "says the column is missing")
-        check("census_2010" in msg and "不通用" in msg,
-              "explains the 2010 list is not a substitute")
+        check("找不到对应的行业码列" in msg, "industry mode says the industry column is missing")
+        check("census_2018" in msg and "另一套码表" in msg,
+              "and explains the occupation column is a different code list, not a substitute")
+        check('CLASSIFY_BY 改成 "occupation"' in msg, "tells you how to switch modes")
 
         print("\n-- chunk size does not change the output --")
         out10 = workdir / "out10"

@@ -33,9 +33,9 @@ python verify_circumstance.py --input out/labeled/ --mismatches-only
 
 ## 一键脚本（填空即用）：`run_construction_split.py`
 
-已经有年龄段 chunk 了，只想按 census_2018 分出 construction / 非 construction，
-并且**同时要合并版和年龄分层版**，用这个。脚本顶部有「配置区」，把路径填进空白引号里
-直接运行即可：
+已经有年龄段 chunk 了，只想按 **`census2018_industry`** 分出 construction /
+非 construction，并且**同时要合并版和年龄分层版**，用这个。脚本顶部有「配置区」，
+把路径填进空白引号里直接运行即可：
 
 ```python
 INPUT_DIR  = r""      # 例：r"D:\NVDRS\age_chunks"
@@ -57,11 +57,11 @@ python run_construction_split.py --input-dir "D:\age_chunks" --output-dir "D:\ou
 年龄分层（5 段 × 3 类）          合并（全年龄段）
 nvdrs_age_18_27_construction.csv   all_ages_construction.csv
 nvdrs_age_18_27_nonconstruction.csv  all_ages_nonconstruction.csv
-nvdrs_age_18_27_blank.csv          all_ages_blank.csv
+nvdrs_age_18_27_unknown.csv        all_ages_unknown.csv
 ...
-summary_by_age_band.csv    各年龄段计数
-file_map.csv               输入 -> 输出 路径对照表
-census_2018_breakdown.csv  逐个码的行数
+summary_by_age_band.csv            各年龄段计数
+file_map.csv                       输入 -> 输出 路径对照表
+census2018_industry_breakdown.csv  逐个行业码的行数 + 行业名称
 ```
 
 合并文件带 `age_band` 和 `occupation_group` 两列，**分层信息不丢** —— 从合并文件
@@ -69,13 +69,33 @@ census_2018_breakdown.csv  逐个码的行数
 
 控制台和 `file_map.csv` 都会逐条列出每个输出文件对应的输入文件和完整路径。
 
+### 行业码 vs 职业码：选出的不是同一批人
+
+默认按 **industry**（`CLASSIFY_BY = "industry"`）：
+
+| | industry（`census2018_industry`） | occupation（`census_2018`） |
+|---|---|---|
+| 含义 | 雇主属于哪个行业 | 本人做什么工种 |
+| construction | **0770**（单个码，不是区间） | 6200–6765 |
+| 采矿/采掘（选配） | 0370–0490 | 6800–6950 |
+| 建筑公司的会计 | ✅ 算 | ❌ 不算 |
+| 学校雇的木匠 | ❌ 不算 | ✅ 算 |
+
+两套码表**不可互换**。industry 模式找不到行业列时不会退回职业列，而是报错并告诉你
+找到的是另一套码表、以及怎么切换模式。测试里构造了三组人（只在 industry 里算、
+只在 occupation 里算、两边都算）各 20 行，断言两种模式选出的集合确实不同。
+
+要改回按职业划分：配置区 `CLASSIFY_BY = "occupation"`，或命令行
+`--classify-by occupation`。
+
 ### 注意事项
 
 - **自动跳过 `age_distribution.csv` 和 `nvdrs_age_excluded.csv`** —— 前者是汇总表，
   后者是年龄超范围被排除的行，都不是样本。用目录模式时会打印跳过了哪些文件。
-- **空白 census_2018 默认单独成文件**。要并进非 construction，把配置区的
-  `BLANK_GOES_TO` 改成 `"nonconstruction"`（会打印提醒：这些是「职业未知」而非
-  「已知不是建筑」）。
+- **码为空、或码读不出来（非数字）的行默认单独成 `*_unknown.csv`**。这两种都是
+  「行业未知」，和「已知不是建筑」不是一回事，混进去会让非建筑组的分母变大。要合并
+  就把 `UNKNOWN_GOES_TO` 改成 `"nonconstruction"`（会打印提醒）。汇总表里
+  `blank_code` 和 `unparseable_code` 两个计数是分开的。
 - **读入行数 = 写出行数**，每次运行都会核对并打印，对不上会告警。
 - 分块读写，1.7 GB 输入也只占几百 MB 内存；不同 chunk-size 输出一致。
 

@@ -17,10 +17,11 @@ python filter_years.py --input input_list.txt --years 2020-2023 --output-dir fil
 # 第 1 步：按年龄分段切成 chunk（18-27 / 28-37 / 38-47 / 48-57 / 58-67）
 python split_by_age.py --input filtered/ --output-dir age_chunks/
 
-# 第 2 步：看脚本在文件里认出了哪些列、各列有哪些取值（不写任何文件）
-python nvdrs_split.py --input age_chunks/ --inspect
+# 第 2 步：按 Census 2018 码筛出 construction（另出空白码文件 + 三个清单）
+python filter_construction.py --input age_chunks/ --output-dir construction/
 
-# 第 3 步：确认列名对了，按 circumstance × occupation 拆分
+# 第 3 步（可选）：按 circumstance × occupation 做四分类拆分
+python nvdrs_split.py --input age_chunks/ --inspect
 python nvdrs_split.py --input age_chunks/ --output-dir out/
 
 # 第 4 步：核对派生的布尔列
@@ -28,6 +29,104 @@ python verify_circumstance.py --input out/labeled/ --mismatches-only
 ```
 
 先筛年份再切年龄，后面每一步处理的数据量都小一截。
+
+## 按 Census 2018 筛 construction：`filter_construction.py`
+
+对年龄段 chunk（或任何 CSV 列表）按 `census_2018` 列筛出建筑业，**空白码单独出一个
+文件**，并生成可直接喂给下一步的清单。
+
+```bash
+# 1) 先看文件里实际出现了哪些建筑业码，不写文件
+python filter_construction.py --input age_chunks/ --inspect
+
+# 2) 筛选
+python filter_construction.py --input age_chunks/ --output-dir construction/
+
+# 把非建筑行也留下来核对
+python filter_construction.py --input age_chunks/ --output-dir construction/ \
+    --keep-nonconstruction
+```
+
+Python 里调用：
+
+```python
+from filter_construction import filter_construction
+result = filter_construction(input_list, output_dir="construction/")
+print(result["totals"])
+```
+
+### 码段定义（Census 2018）
+
+2018 版 Census 职业码里 Construction and Extraction Occupations 占 **6200–6950**：
+
+| 码段 | 内容 | 默认 |
+|---|---|---|
+| 6200–6765 | 建筑工种（含一线主管、Other construction and related workers） | **计入** |
+| 6800–6950 | Extraction workers（采掘） | 不计入，`--include-extraction` 开启 |
+| 0220 | Construction managers（归在 Management 大类下） | 不计入，`--include-managers` 开启 |
+
+**注意 2018 与 2010 码表不通用** —— 2010 版 extraction 止于 6940，2018 版止于 6950。
+本仓库 `nvdrs_split.py` 用的是 2010 码表，两者不要混用。如果文件里只有 `census_2010`
+这类列，脚本会**报错并说明两套码表不可互换**，而不是拿它硬筛。
+
+### 输出
+
+每个输入文件产出：
+
+```
+<stem>_construction.csv       census_2018 落在建筑码段
+<stem>_blank.csv              census_2018 为空白
+<stem>_nonconstruction.csv    其余（需 --keep-nonconstruction）
+```
+
+加上三个清单和两个复核文件：
+
+```
+input_list.txt              实际读入的文件，按顺序
+construction_list.txt       建筑业输出文件清单
+blank_list.txt              空白码输出文件清单
+construction_summary.csv    每个文件的各类计数
+census_2018_breakdown.csv   逐个码的行数 + 职业名称 + 是否被计入
+```
+
+三个 `.txt` 清单可以直接作为下一步的 `--input`：
+
+```bash
+python filter_construction.py --input construction/construction_list.txt ...
+```
+
+运行时会打印实际出现的建筑业码及其职业名称，方便核对：
+
+```
+construction codes actually present:
+census_2018                                    title  n
+       6200 First-line supervisors of construc...    40
+       6230                              Carpenters   40
+       6260                   Construction laborers   40
+       6330                            Electricians   40
+```
+
+### 几个做严的地方
+
+- **空白码单独成文件**，不和非建筑混在一起 —— 空白是「不知道职业」，和「知道且不是
+  建筑」是两回事，混在一起会影响分母。
+- **三类互斥且完整**：construction + blank + other 恒等于读入行数（测试有断言）。
+- **非数字码（如 `unknown`）计入 other 并单独报数**，绝不会被当成建筑。
+- **职业名称只用于显示**，筛选完全依据数值码段，所以名称表不全也不会改变筛选结果
+  （范围内但不在本地名称表的码会单独提示你去核对官方码表）。
+- 空结果也写**带表头的文件**；完全没匹配到时会打印显著警告。
+- 分块读写，大文件不占内存；不同 chunk-size 输出一致。
+
+| 参数 | 说明 |
+|---|---|
+| `--input` | CSV 文件、目录，或每行一个路径的 `.txt` |
+| `--output-dir` | 输出目录，默认 `construction` |
+| `--census-col` | 手动指定 Census 2018 码列 |
+| `--include-extraction` | 把 6800–6950 采掘业计入建筑 |
+| `--include-managers` | 把 0220 建筑经理计入建筑 |
+| `--keep-nonconstruction` | 额外写出非建筑行 |
+| `--inspect` | 只报告出现了哪些码，不写文件 |
+| `--chunk-size` | 每块行数，默认 50000 |
 
 ## 按年龄切 chunk：`split_by_age.py`
 
@@ -374,6 +473,7 @@ PYTHONPATH=tests python tests/test_nvdrs_split.py
 python tests/test_verify_circumstance.py
 python tests/test_filter_years.py
 python tests/test_split_by_age.py
+python tests/test_filter_construction.py
 ```
 
 `test_nvdrs_split.py` 覆盖：编码路径与关键词路径的分类正确性、`Yes/No/Unknown/空`
@@ -388,6 +488,11 @@ Unknown 被当成 FALSE），断言脚本恰好抓到这 3 行、行号正确、
 时拒绝猜测、incident year 与 death year 同时存在时选对列、`input_list` / 目录 / `.txt`
 三种输入等价、重复路径去重、分块读与单次读结果一致、日期格式取年、空值与不可解析年份
 被单独报出。
+
+`test_filter_construction.py` 覆盖：Census 2018 码段边界精确（6199/6766/6800/6951 都在
+界外）、`--include-extraction` 与 `--include-managers` 的效果、三类互斥且完整、空白码
+进独立文件、非数字码不被当成建筑、三个清单可回喂作输入、拒绝 2010 码列、不同 chunk-size
+输出一致。
 
 `test_split_by_age.py` 用 0–100 每个年龄各一行来逐个验证边界：各段恰好 10 行、合起来
 正好覆盖 18–67、17 和 68 被排除、没有行进两个文件、写入+排除等于读入、不同 chunk-size

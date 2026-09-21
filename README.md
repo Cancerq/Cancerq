@@ -31,6 +31,54 @@ python verify_circumstance.py --input out/labeled/ --mismatches-only
 
 先筛年份再切年龄，后面每一步处理的数据量都小一截。
 
+## 一键脚本（填空即用）：`run_construction_split.py`
+
+已经有年龄段 chunk 了，只想按 census_2018 分出 construction / 非 construction，
+并且**同时要合并版和年龄分层版**，用这个。脚本顶部有「配置区」，把路径填进空白引号里
+直接运行即可：
+
+```python
+INPUT_DIR  = r""      # 例：r"D:\NVDRS\age_chunks"
+INPUT_FILES = [r"", ] # 或者逐个列出文件（填了这个就忽略 INPUT_DIR）
+OUTPUT_DIR = r""      # 例：r"D:\NVDRS\construction_out"
+```
+
+```bash
+python run_construction_split.py
+# 或者不改文件，用命令行覆盖：
+python run_construction_split.py --input-dir "D:\age_chunks" --output-dir "D:\out"
+```
+
+路径没填会**明确告诉你哪个空没填、怎么填**，不会抛 traceback。
+
+### 输出
+
+```
+年龄分层（5 段 × 3 类）          合并（全年龄段）
+nvdrs_age_18_27_construction.csv   all_ages_construction.csv
+nvdrs_age_18_27_nonconstruction.csv  all_ages_nonconstruction.csv
+nvdrs_age_18_27_blank.csv          all_ages_blank.csv
+...
+summary_by_age_band.csv    各年龄段计数
+file_map.csv               输入 -> 输出 路径对照表
+census_2018_breakdown.csv  逐个码的行数
+```
+
+合并文件带 `age_band` 和 `occupation_group` 两列，**分层信息不丢** —— 从合并文件
+随时能还原出分层。测试断言了 `all_ages_X.csv` 与 5 个分层文件拼接后**完全相等**。
+
+控制台和 `file_map.csv` 都会逐条列出每个输出文件对应的输入文件和完整路径。
+
+### 注意事项
+
+- **自动跳过 `age_distribution.csv` 和 `nvdrs_age_excluded.csv`** —— 前者是汇总表，
+  后者是年龄超范围被排除的行，都不是样本。用目录模式时会打印跳过了哪些文件。
+- **空白 census_2018 默认单独成文件**。要并进非 construction，把配置区的
+  `BLANK_GOES_TO` 改成 `"nonconstruction"`（会打印提醒：这些是「职业未知」而非
+  「已知不是建筑」）。
+- **读入行数 = 写出行数**，每次运行都会核对并打印，对不上会告警。
+- 分块读写，1.7 GB 输入也只占几百 MB 内存；不同 chunk-size 输出一致。
+
 ## 职业分组只依据 census_2018
 
 `census_2018.py` 是全仓库**唯一**的 Census 2018 码段定义，`filter_construction.py`
@@ -511,6 +559,7 @@ python tests/test_filter_years.py
 python tests/test_split_by_age.py
 python tests/test_filter_construction.py
 python tests/test_census_2018_only.py
+python tests/test_run_construction_split.py
 ```
 
 `test_nvdrs_split.py` 覆盖：编码路径与关键词路径的分类正确性、`Yes/No/Unknown/空`

@@ -31,6 +31,48 @@ python verify_circumstance.py --input out/labeled/ --mismatches-only
 
 先筛年份再切年龄，后面每一步处理的数据量都小一截。
 
+## 电工三分组：`run_electrician_split.py`
+
+从年龄段 CSV 里筛出电工，再按行业交叉分成三组（外加一组行业未知）：
+
+| 组 | 定义 |
+|---|---|
+| `Construction_electrician` | `Census2018_Occupation` = 6330 **且** `Census2018_Industry` = 0770 |
+| `Non_construction_electrician` | 6330 **且** 行业为其他已知行业 |
+| `Unknown_industry_electrician` | 6330 **且** 行业码为空或读不出 |
+| `All_industry_electrician` | 6330，不分行业（= 上面三组之和） |
+
+**电工是职业码，construction 是行业码，两列缺一不可。**
+
+```bash
+# 填好配置区的 INPUT_DIR（OUTPUT_DIR 已预填）后直接运行
+python run_electrician_split.py
+
+# 或命令行
+python run_electrician_split.py --input-dir "D:\...\age_chunks"
+```
+
+每组都产出年龄分层（5 个）+ 合并（1 个），共 24 个 CSV，加上 `file_map.csv`、
+`summary_by_age_band.csv`、`electrician_industry_breakdown.csv`。
+
+### 三点要注意
+
+- **`All_industry` 是并集，行会重复出现**：同一名电工既在 All 文件里，也在它所属的
+  行业组文件里。这是设计如此，让 All 文件能独立作为「全部电工」使用。脚本每次运行
+  都核对 `All = Construction + Non_construction + Unknown_industry` 并打印。
+- **行业未知的电工默认单独成组，不并入对照组**。做 construction vs non-construction
+  对比时，把行业未知的人塞进对照组会污染对照组 —— 他们当中可能就有建筑业电工。
+  要合并改 `UNKNOWN_INDUSTRY_GOES_TO = "nonconstruction"`。
+- **列名解析防串台**：`Census2018_Industry` 归一化后是 `census2018industry`，
+  **包含**职业列的候选词 `census2018`。脚本先认行业列并把它排除在职业列搜索之外，
+  职业列搜索还会跳过任何含 `industry` 的列名。缺任何一列会报错并点名，不会拿另一列
+  顶替（测试里专门验了这条）。
+
+电工码默认只有 **6330（Electricians）**。这三类**不在**默认范围内，需要自行加进
+`ELECTRICIAN_CODES`：`6600` Helpers, construction trades（电工帮工并入了这个总类，
+无法单独拆出）、电力线路安装维修工、电气电子维修工（后两类属于 Installation,
+Maintenance and Repair 大类 7000–7640，不是 Electricians）。
+
 ## 一键脚本（填空即用）：`run_construction_split.py`
 
 已经有年龄段 chunk 了，只想按 **`census2018_industry`** 分出 construction /
@@ -580,6 +622,7 @@ python tests/test_split_by_age.py
 python tests/test_filter_construction.py
 python tests/test_census_2018_only.py
 python tests/test_run_construction_split.py
+python tests/test_run_electrician_split.py
 ```
 
 `test_nvdrs_split.py` 覆盖：编码路径与关键词路径的分类正确性、`Yes/No/Unknown/空`

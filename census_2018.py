@@ -79,6 +79,8 @@ TITLES = {
 }
 
 CENSUS_2018_COL_CANDIDATES = (
+    "census2018occupation",
+    "census2018occ",
     "census2018",
     "censusoccupation2018",
     "occupationcensus2018",
@@ -86,6 +88,32 @@ CENSUS_2018_COL_CANDIDATES = (
     "occ2018",
     "censuscode2018",
 )
+
+
+def find_occupation_column(columns, exclude=()) -> str | None:
+    """Find the occupation-code column, never an industry column.
+
+    "Census2018_Industry" normalises to "census2018industry", which CONTAINS
+    the occupation candidate "census2018". Without this guard a substring
+    match would hand back the industry column and every code would be read
+    against the wrong list.
+    """
+    from nvdrs_split import _norm_colname
+
+    excluded = set(exclude)
+    normalised = {
+        _norm_colname(c): c
+        for c in columns
+        if c not in excluded and "industry" not in _norm_colname(c)
+    }
+    for cand in CENSUS_2018_COL_CANDIDATES:
+        if cand in normalised:
+            return normalised[cand]
+    for cand in CENSUS_2018_COL_CANDIDATES:
+        for norm, original in normalised.items():
+            if cand in norm:
+                return original
+    return None
 
 
 def parse_code(value) -> int | str:

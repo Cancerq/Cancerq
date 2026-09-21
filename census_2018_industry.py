@@ -66,6 +66,21 @@ SECTORS = [
 ]
 
 
+def find_industry_column(columns, exclude=()) -> str | None:
+    from nvdrs_split import _norm_colname
+
+    excluded = set(exclude)
+    normalised = {_norm_colname(c): c for c in columns if c not in excluded}
+    for cand in COL_CANDIDATES:
+        if cand in normalised:
+            return normalised[cand]
+    for cand in COL_CANDIDATES:
+        for norm, original in normalised.items():
+            if cand in norm:
+                return original
+    return None
+
+
 def in_ranges(code: int, ranges) -> bool:
     return any(low <= code <= high for low, high in ranges)
 

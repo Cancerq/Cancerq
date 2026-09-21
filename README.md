@@ -11,18 +11,105 @@
 ```bash
 pip install pandas
 
-# 第 0 步：先按 incident year 2020-2023 筛选（见下节）
+# 第 0 步：按 incident year 2020-2023 筛选
 python filter_years.py --input input_list.txt --years 2020-2023 --output-dir filtered/
 
-# 第 1 步：看脚本在文件里认出了哪些列、各列有哪些取值（不写任何文件）
-python nvdrs_split.py --input filtered/ --inspect
+# 第 1 步：按年龄分段切成 chunk（18-27 / 28-37 / 38-47 / 48-57 / 58-67）
+python split_by_age.py --input filtered/ --output-dir age_chunks/
 
-# 第 2 步：确认列名对了，正式拆分
-python nvdrs_split.py --input filtered/ --output-dir out/
+# 第 2 步：看脚本在文件里认出了哪些列、各列有哪些取值（不写任何文件）
+python nvdrs_split.py --input age_chunks/ --inspect
 
-# 第 3 步：核对派生的布尔列（见后文）
+# 第 3 步：确认列名对了，按 circumstance × occupation 拆分
+python nvdrs_split.py --input age_chunks/ --output-dir out/
+
+# 第 4 步：核对派生的布尔列
 python verify_circumstance.py --input out/labeled/ --mismatches-only
 ```
+
+先筛年份再切年龄，后面每一步处理的数据量都小一截。
+
+## 按年龄切 chunk：`split_by_age.py`
+
+把一个大文件流式切成各年龄段的 CSV。默认 18–67，十岁一档：
+`18-27`、`28-37`、`38-47`、`48-57`、`58-67`。
+
+```bash
+# 1) 先预览：只读年龄那一列，很快，不写文件
+python split_by_age.py --input nvdrs_big.csv --inspect
+
+# 2) 正式切
+python split_by_age.py --input nvdrs_big.csv --output-dir age_chunks/
+
+# 保留被排除的行以便核对，并压缩输出
+python split_by_age.py --input nvdrs_big.csv --output-dir age_chunks/ \
+    --keep-out-of-range --gzip
+```
+
+Python 里调用：
+
+```python
+from split_by_age import split_by_age
+result = split_by_age("nvdrs_big.csv", output_dir="age_chunks/")
+print(result["band_counts"])
+```
+
+### 大文件实测
+
+在一个 **1.8 GB、63 列、515 万行**的 CSV 上实测过：
+
+| chunk-size | 峰值内存 | 耗时 |
+|---|---|---|
+| 200,000 | 1033 MB | 164 s |
+| **50,000（默认）** | **326 MB** | **171 s** |
+| 25,000 | 217 MB | 183 s |
+
+三种设置的输出文件 **md5 完全一致**。默认选 50000：比 20 万只慢 4%，内存少 3 倍。
+内存不随文件大小增长，只随 chunk-size 和列数走，所以再大的文件也是这个量级。
+
+`--inspect` 只读年龄一列，同一个文件 25 秒就能给出各段行数预览 —— 正式切之前先跑它。
+
+### 输出
+
+```
+ band      n                file
+18-27 258250 nvdrs_age_18_27.csv
+28-37 256299 nvdrs_age_28_37.csv
+...
+total rows read : 5,150,000
+written to bands: 1,287,321
+excluded        : 3,862,679
+  age outside 18-67: 3,862,679
+  age blank        : 0
+  age unreadable   : 0
+```
+
+外加 `age_distribution.csv`（逐个年龄值的行数）。**每一行都有交代**：写入某个段，或计入
+三类排除之一，三者相加必等于读入总数（测试里有断言）。
+
+### 几个做严的地方
+
+- **区间闭区间且不重叠**。`18-27` 含 18 和 27；`parse_bands` 会拒绝重叠区间
+  （否则一行会进两个文件）。测试里用 0–100 每个年龄各一行，逐个边界验过。
+- **不拿 `AgeGroup` 之类的分类列当数值年龄**。只找数值年龄列；如果文件里只有
+  `AgeGroup`/`AgeRange`，脚本会报错并指出这些是预先分好的类别列，而不是硬套。
+  要用就显式 `--age-col`。
+- **900 以上的年龄会单独告警**。NVDRS 这类数据常用 `999` 表示年龄未知，把它当成真实
+  年龄会让统计出问题。这类行不会进任何区间，但会在汇总里单独点名。
+- **多文件合并前校验表头**。表头不一致会报错并指出差异列，而不是错位拼接。
+- 空的区间也会写出**带表头的空文件**，后续步骤不会因为缺文件而崩。
+
+| 参数 | 说明 |
+|---|---|
+| `--input` | CSV 文件、目录，或每行一个路径的 `.txt` |
+| `--output-dir` | 输出目录，默认 `age_chunks` |
+| `--bands` | 自定义区间，如 `18-30 31-40`，默认 `18-27,28-37,38-47,48-57,58-67` |
+| `--age-col` | 手动指定数值年龄列 |
+| `--chunk-size` | 每块行数，默认 50000 |
+| `--gzip` | 输出 `.csv.gz` |
+| `--keep-out-of-range` | 额外写出被排除的行，带 `exclusion_reason` 列 |
+| `--prefix` | 输出文件名前缀，默认 `nvdrs` |
+| `--inspect` | 只预览年龄列和各段行数，不写文件 |
 
 ## 按 incident year 筛选：`filter_years.py`
 
@@ -286,6 +373,7 @@ python tests/make_sample_data.py tests/sample_data   # 可选，单独生成样�
 PYTHONPATH=tests python tests/test_nvdrs_split.py
 python tests/test_verify_circumstance.py
 python tests/test_filter_years.py
+python tests/test_split_by_age.py
 ```
 
 `test_nvdrs_split.py` 覆盖：编码路径与关键词路径的分类正确性、`Yes/No/Unknown/空`
@@ -300,6 +388,11 @@ Unknown 被当成 FALSE），断言脚本恰好抓到这 3 行、行号正确、
 时拒绝猜测、incident year 与 death year 同时存在时选对列、`input_list` / 目录 / `.txt`
 三种输入等价、重复路径去重、分块读与单次读结果一致、日期格式取年、空值与不可解析年份
 被单独报出。
+
+`test_split_by_age.py` 用 0–100 每个年龄各一行来逐个验证边界：各段恰好 10 行、合起来
+正好覆盖 18–67、17 和 68 被排除、没有行进两个文件、写入+排除等于读入、不同 chunk-size
+输出完全一致、表头只写一次、拒绝分类年龄列、拒绝表头不一致的合并、gzip 与普通输出内容
+相同。
 
 ## 注意
 

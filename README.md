@@ -31,7 +31,84 @@ python verify_circumstance.py --input out/labeled/ --mismatches-only
 
 先筛年份再切年龄，后面每一步处理的数据量都小一截。
 
-## 第一步：按 IncidentYear 拆年 —— `split_by_year.py`
+## 一步到位（推荐）：`run_electrician_pipeline.py`
+
+**从原始大文件一遍扫完**：年龄分段 + 年份筛选 + 电工三分组。不写任何中间文件。
+
+```python
+INPUT_FILES = [ r"D:\...\Liu_1191_nvdrs_2024.csv" ]
+OUTPUT_DIR  = r"D:\...\Electricians_18_70_2018_2024"
+```
+
+```bash
+python run_electrician_pipeline.py
+```
+
+四个判断，全部直接读列：
+
+```
+年龄段  Age 落在 18-30 / 31-40 / 41-50 / 51-60 / 61-70
+年份    IncidentYear 在 2018-2024
+是电工  Census2018_Occupation 出现 "Electrician"
+是建筑  Census2018_Industry   等于  "Construction"
+```
+
+### 2.1 GB 实测
+
+在生成的 **2.0 GB、66 列、525 万行** 文件上实跑：
+
+| | |
+|---|---|
+| 耗时 | **138 秒**（37,900 行/秒） |
+| 峰值内存 | **252 MB** |
+| 输出总大小 | 180 MB（只保留电工） |
+
+内存不随文件大小增长，只随 chunk-size 和列数走。
+
+### 输出
+
+```
+OUTPUT_DIR/
+  All_year/                             ← 最终总表
+    <组>_All_year.csv                   全年龄全年份
+    <组>_All_year_age_18-30.csv ...     分年龄段
+  by_year/2018/ ... by_year/2024/
+    <组>_2018.csv                       该年全年龄
+  summary_by_year_and_age.csv           年份 × 年龄段 × 组 计数
+  funnel.csv                            逐级筛选的行数交代
+  file_map.csv / 两个核对文件
+```
+
+每个输出行都带 `age_band` / `incident_year` / `electrician_group` 三列，所以从
+`All_year` 总表随时能自己重新切分。`--per-year-per-band` 可额外输出
+「每年 × 每段」的 140 个行级小文件（默认关闭，计数已在 summary 里）。
+
+### 逐级筛选（funnel）
+
+每次运行都交代清楚每一行去了哪：
+
+```
+                 stage     rows
+                 读入总行数  5250000
+            年龄无法解析（剔除）        0
+        年龄不在 18-70（剔除） -2625503
+            年份无法解析（剔除）        0
+    年份不在 2018-2024（剔除）  -786337
+职业不含 'electrician'（剔除） -1766862
+            = 电工（进入分组）    71298
+  （逐级相减 = 电工数，没有行被漏算）
+```
+
+加上 `All = Construction + Non_construction + Unknown` 的核对，以及
+`All_year == 7 个年份之和 == 5 个年龄段之和`（测试有断言）。
+
+### 不会拿错列
+
+`DeathYear` 不会顶替 `IncidentYear`（跨年案例中不同），`AgeGroup` 不会顶替数值
+`Age`，`Census2018_Industry` 不会被当成职业列。缺哪一列就报哪一列，并说明为什么
+找到的那个不能替代。
+
+## 分步版：按 IncidentYear 拆年 —— `split_by_year.py`
 
 把年龄段 CSV 按 `IncidentYear` 拆成 2018–2024 各年。**只看这一列**，不碰
 occupation / industry。
@@ -771,6 +848,7 @@ python tests/test_run_construction_split.py
 python tests/test_run_electrician_split.py
 python tests/test_split_by_year.py
 python tests/test_run_electrician_by_year.py
+python tests/test_run_electrician_pipeline.py
 ```
 
 `test_nvdrs_split.py` 覆盖：编码路径与关键词路径的分类正确性、`Yes/No/Unknown/空`

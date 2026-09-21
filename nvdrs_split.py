@@ -351,6 +351,36 @@ def _in_ranges(code: int, ranges) -> bool:
     return any(low <= code <= high for low, high in ranges)
 
 
+def classify_occupation_census_2018(
+    df: pd.DataFrame,
+    census_col: str,
+    *,
+    include_extraction: bool = False,
+    include_managers: bool = False,
+) -> pd.DataFrame:
+    """Group occupations from the census_2018 column and nothing else.
+
+    No keyword matching, no industry column, no free-text fallback: a row's
+    group depends only on its Census 2018 code, so the result is reproducible
+    from that one feature. Code ranges come from census_2018.py, the same
+    definition filter_construction.py uses.
+    """
+    from census_2018 import classify as classify_2018  # local: avoids a cycle
+
+    results = df[census_col].map(
+        lambda v: classify_2018(
+            v,
+            include_extraction=include_extraction,
+            include_managers=include_managers,
+        )
+    )
+    return pd.DataFrame(
+        results.tolist(),
+        columns=["occupation_group", "occupation_group_rule"],
+        index=df.index,
+    )
+
+
 def classify_occupation(
     df: pd.DataFrame,
     rules: dict,
@@ -362,6 +392,12 @@ def classify_occupation(
     include_extraction: bool = False,
 ) -> pd.DataFrame:
     """Return a frame with `occupation_group` and `occupation_group_rule`.
+
+    This is the multi-feature classifier (Census 2010 codes, then free-text
+    keywords, then industry). If your data has a census_2018 column and you
+    want the grouping to depend on that alone, use
+    classify_occupation_census_2018 instead -- nvdrs_split.py selects it
+    automatically when a census_2018 column is present.
 
     Precedence: numeric census code -> free-text keywords -> industry
     (construction only) -> fallback. Group precedence within each stage is
@@ -446,8 +482,11 @@ def resolve_columns(df: pd.DataFrame, args) -> dict:
     cols: dict[str, str | None] = {}
     claimed: list[str] = []
 
+    from census_2018 import CENSUS_2018_COL_CANDIDATES  # local: avoids a cycle
+
     for role, override, candidates in (
         ("circumstance", args.circumstance_col, CIRCUMSTANCE_COL_CANDIDATES),
+        ("census_2018", getattr(args, "census_2018_col", None), CENSUS_2018_COL_CANDIDATES),
         ("occupation_code", args.occupation_code_col, OCCUPATION_CODE_COL_CANDIDATES),
         ("occupation_text", args.occupation_col, OCCUPATION_TEXT_COL_CANDIDATES),
         ("industry_code", args.industry_code_col, INDUSTRY_CODE_COL_CANDIDATES),
@@ -504,6 +543,10 @@ def inspect(files: list[Path], args) -> None:
         cols = resolve_columns(df, args)
         print(f"\n=== {path} ===")
         print(f"rows: {len(df)}  columns: {len(df.columns)}")
+        mode = (
+            "census_2018 only" if cols["census_2018"] else "multi-feature (2010 + keywords)"
+        )
+        print(f"occupation grouping mode: {mode}")
         print("detected columns:")
         for key, value in cols.items():
             print(f"  {key:<16} {value if value else '<not found>'}")
@@ -541,33 +584,51 @@ def process(files: list[Path], args, rules: dict) -> None:
                 f"{path}: could not find a circumstance-known column; pass "
                 "--circumstance-col explicitly (run --inspect to list columns)"
             )
-        if cols["occupation_text"] is None and cols["occupation_code"] is None:
+        if (
+            cols["census_2018"] is None
+            and cols["occupation_text"] is None
+            and cols["occupation_code"] is None
+        ):
             raise SystemExit(
                 f"{path}: could not find an occupation column; pass "
-                "--occupation-col and/or --occupation-code-col explicitly"
+                "--census-2018-col (preferred), or --occupation-col and/or "
+                "--occupation-code-col"
             )
 
         df["circumstance_known_bool"] = to_circumstance_bool(
             df[cols["circumstance"]], rules
         )
-        df[["occupation_group", "occupation_group_rule"]] = classify_occupation(
-            df,
-            rules,
-            text_col=cols["occupation_text"],
-            code_col=cols["occupation_code"],
-            industry_code_col=cols["industry_code"],
-            industry_text_col=cols["industry_text"],
-            include_extraction=args.include_extraction,
-        )
+        if cols["census_2018"]:
+            # census_2018 present: group on that column alone.
+            df[["occupation_group", "occupation_group_rule"]] = (
+                classify_occupation_census_2018(
+                    df,
+                    cols["census_2018"],
+                    include_extraction=args.include_extraction,
+                    include_managers=getattr(args, "include_managers", False),
+                )
+            )
+        else:
+            df[["occupation_group", "occupation_group_rule"]] = classify_occupation(
+                df,
+                rules,
+                text_col=cols["occupation_text"],
+                code_col=cols["occupation_code"],
+                industry_code_col=cols["industry_code"],
+                industry_text_col=cols["industry_text"],
+                include_extraction=args.include_extraction,
+            )
         df["age_band"] = band
 
         labeled_path = out_dir / "labeled" / f"{slugify(band)}_labeled.csv"
         df.to_csv(labeled_path, index=False)
 
-        if cols["occupation_text"]:
+        # Audit on whatever column actually drove the grouping.
+        audit_col = cols["census_2018"] or cols["occupation_text"]
+        if audit_col:
             audit = (
                 df.groupby(
-                    [cols["occupation_text"], "occupation_group", "occupation_group_rule"],
+                    [audit_col, "occupation_group", "occupation_group_rule"],
                     dropna=False,
                 )
                 .size()
@@ -578,9 +639,10 @@ def process(files: list[Path], args, rules: dict) -> None:
             audit_rows.append(audit)
 
             # occupation values that only matched the catch-all rule
+            # (census_2018 mode has no fallback, so this stays empty there)
             fallback = df.loc[df["occupation_group_rule"] == "fallback_text"]
             if len(fallback):
-                counts = fallback[cols["occupation_text"]].value_counts()
+                counts = fallback[audit_col].value_counts()
                 unmapped.extend(
                     {"age_band": band, "occupation_value": value, "n": int(n)}
                     for value, n in counts.items()
@@ -695,6 +757,13 @@ def main(argv=None) -> int:
         help="report detected columns and value counts, write nothing",
     )
     parser.add_argument("--circumstance-col")
+    parser.add_argument(
+        "--census-2018-col",
+        dest="census_2018_col",
+        help="Census 2018 code column. When present (found automatically or "
+             "named here) the occupation grouping uses ONLY this column -- no "
+             "keywords, no industry, no free-text fallback",
+    )
     parser.add_argument("--occupation-col", help="free-text occupation column")
     parser.add_argument("--occupation-code-col", help="census occupation code column")
     parser.add_argument("--industry-col", help="free-text industry column (optional)")
@@ -702,7 +771,14 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--include-extraction",
         action="store_true",
-        help="count extraction occupations (census 6800-6940) as construction",
+        help="count extraction occupations as construction "
+             "(census 2018: 6800-6950; census 2010: 6800-6940)",
+    )
+    parser.add_argument(
+        "--include-managers",
+        action="store_true",
+        help="census_2018 mode only: count construction managers (0220) "
+             "as construction",
     )
     parser.add_argument(
         "--drop-unknown-circumstance",

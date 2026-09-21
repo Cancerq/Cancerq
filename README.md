@@ -21,6 +21,7 @@ python split_by_age.py --input filtered/ --output-dir age_chunks/
 python filter_construction.py --input age_chunks/ --output-dir construction/
 
 # 第 3 步（可选）：按 circumstance × occupation 做四分类拆分
+# 数据里有 census_2018 列时，职业分组只用这一列（见下）
 python nvdrs_split.py --input age_chunks/ --inspect
 python nvdrs_split.py --input age_chunks/ --output-dir out/
 
@@ -29,6 +30,41 @@ python verify_circumstance.py --input out/labeled/ --mismatches-only
 ```
 
 先筛年份再切年龄，后面每一步处理的数据量都小一截。
+
+## 职业分组只依据 census_2018
+
+`census_2018.py` 是全仓库**唯一**的 Census 2018 码段定义，`filter_construction.py`
+和 `nvdrs_split.py` 都从它导入，所以两个脚本对「construction」的定义不可能漂移
+（测试里断言了两者引用同一个对象）。
+
+**`nvdrs_split.py` 一旦检测到 `census_2018` 列，职业分组就只看这一列** —— 不跑关键词、
+不看行业列、没有自由文本兜底。分组规则：
+
+| census_2018 | 组 |
+|---|---|
+| 6200–6765 | `construction`（`--include-extraction` 再加 6800–6950，`--include-managers` 再加 0220） |
+| 9800–9830 | `military` |
+| 9920 | `non_workforce` |
+| 其余 1–9799 | `non_construction` |
+| 空白 / 非数字 / 码表外 | `unclassified` |
+
+`occupation_group_rule` 列会写明是 `census_2018_code`、`census_2018_blank`、
+`census_2018_unparseable` 还是 `census_2018_out_of_list`，一眼能看出这行凭什么被分到
+那一组。
+
+测试用**故意矛盾的数据**验证这一点：每行的 census_2018 码和 Occupation 文本、
+OccupationCode、IndustryCode 都对着干（比如 `census_2018=3130` 但文本写
+"Construction laborer"、行业码 0770），断言结果全部跟着 census_2018 走，且
+`occupation_keyword` / `industry_code` / `fallback_text` 这些规则**一次都没触发**。
+
+没有 `census_2018` 列时，仍然退回原来的多特征分类器（2010 码 + 关键词 + 行业），
+`--inspect` 会明确告诉你当前是哪种模式：
+
+```
+occupation grouping mode: census_2018 only
+```
+
+要强制指定列名用 `--census-2018-col`。
 
 ## 按 Census 2018 筛 construction：`filter_construction.py`
 
@@ -474,6 +510,7 @@ python tests/test_verify_circumstance.py
 python tests/test_filter_years.py
 python tests/test_split_by_age.py
 python tests/test_filter_construction.py
+python tests/test_census_2018_only.py
 ```
 
 `test_nvdrs_split.py` 覆盖：编码路径与关键词路径的分类正确性、`Yes/No/Unknown/空`
@@ -488,6 +525,9 @@ Unknown 被当成 FALSE），断言脚本恰好抓到这 3 行、行号正确、
 时拒绝猜测、incident year 与 death year 同时存在时选对列、`input_list` / 目录 / `.txt`
 三种输入等价、重复路径去重、分块读与单次读结果一致、日期格式取年、空值与不可解析年份
 被单独报出。
+
+`test_census_2018_only.py` 用矛盾数据证明 `nvdrs_split.py` 的职业分组只受 census_2018
+影响，并断言两个脚本共用同一份码段定义。
 
 `test_filter_construction.py` 覆盖：Census 2018 码段边界精确（6199/6766/6800/6951 都在
 界外）、`--include-extraction` 与 `--include-managers` 的效果、三类互斥且完整、空白码

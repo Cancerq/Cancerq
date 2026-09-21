@@ -88,7 +88,7 @@ def main() -> int:
             check(got == want, f"parse_code({raw!r}) -> {got!r}")
 
         print("\n-- Census 2018 range boundaries --")
-        ranges = fc.build_ranges(False, False)
+        ranges = fc.build_construction_ranges(False, False)
         check(fc.in_ranges(6200, ranges), "6200 in (lower boundary of trades)")
         check(fc.in_ranges(6765, ranges), "6765 in (upper boundary of trades)")
         check(not fc.in_ranges(6199, ranges), "6199 out")
@@ -96,12 +96,12 @@ def main() -> int:
         check(not fc.in_ranges(6800, ranges), "6800 out by default (extraction)")
         check(not fc.in_ranges(220, ranges), "0220 out by default (managers)")
 
-        ext = fc.build_ranges(True, False)
+        ext = fc.build_construction_ranges(True, False)
         check(fc.in_ranges(6800, ext) and fc.in_ranges(6950, ext),
               "--include-extraction covers 6800-6950")
         check(not fc.in_ranges(6951, ext), "6951 still out with extraction")
         check(not fc.in_ranges(6799, ext), "6799 still out (gap between ranges)")
-        mgr = fc.build_ranges(False, True)
+        mgr = fc.build_construction_ranges(False, True)
         check(fc.in_ranges(220, mgr), "--include-managers covers 0220")
 
         print("\n-- default filtering matches the expected bucket --")

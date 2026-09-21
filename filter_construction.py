@@ -41,7 +41,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -52,94 +51,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from filter_years import collect_inputs  # noqa: E402
 from nvdrs_split import _norm_colname, _norm_value, read_csv  # noqa: E402
 
-# --- Census 2018 occupation code ranges (inclusive) -------------------------
-CONSTRUCTION_TRADES = (6200, 6765)
-EXTRACTION_WORKERS = (6800, 6950)
-CONSTRUCTION_MANAGERS = (220, 220)
-
-CENSUS_2018_COL_CANDIDATES = (
-    "census2018",
-    "censusoccupation2018",
-    "occupationcensus2018",
-    "census2018code",
-    "occ2018",
-    "censuscode2018",
+# Code ranges, titles and parsing all come from census_2018.py, which is the
+# single definition shared with nvdrs_split.py.
+from census_2018 import (  # noqa: E402
+    title as census_title,
+    BLANK,
+    CENSUS_2018_COL_CANDIDATES,
+    CONSTRUCTION_MANAGERS,
+    CONSTRUCTION_TRADES,
+    EXTRACTION_WORKERS,
+    UNPARSEABLE,
+    build_construction_ranges,
+    describe_ranges,
+    in_ranges,
+    parse_code,
 )
-
-# Convenience labels for the per-code breakdown. These are only printed, never
-# used to decide what is kept -- filtering depends on the numeric ranges alone,
-# so a missing or imperfect title cannot change which rows you get.
-CENSUS_2018_TITLES = {
-    6200: "First-line supervisors of construction trades and extraction workers",
-    6210: "Boilermakers",
-    6220: "Brickmasons, blockmasons, stonemasons, and reinforcing iron and rebar workers",
-    6230: "Carpenters",
-    6240: "Carpet, floor, and tile installers and finishers",
-    6250: "Cement masons, concrete finishers, and terrazzo workers",
-    6260: "Construction laborers",
-    6300: "Construction equipment operators",
-    6320: "Drywall installers, ceiling tile installers, and tapers",
-    6330: "Electricians",
-    6350: "Glaziers",
-    6360: "Insulation workers",
-    6400: "Painters and paperhangers",
-    6410: "Pipelayers",
-    6441: "Plumbers, pipefitters, and steamfitters",
-    6460: "Plasterers and stucco masons",
-    6515: "Roofers",
-    6520: "Sheet metal workers",
-    6530: "Structural iron and steel workers",
-    6540: "Solar photovoltaic installers",
-    6600: "Helpers, construction trades",
-    6660: "Construction and building inspectors",
-    6700: "Elevator and escalator installers and repairers",
-    6710: "Fence erectors",
-    6720: "Hazardous materials removal workers",
-    6730: "Highway maintenance workers",
-    6740: "Rail-track laying and maintenance equipment operators",
-    6765: "Other construction and related workers",
-    6800: "Derrick, rotary drill, and service unit operators, oil and gas",
-    6825: "Earth drillers, except oil and gas",
-    6835: "Explosives workers, ordnance handling experts, and blasters",
-    6850: "Underground mining machine operators",
-    6950: "Other extraction workers",
-    220: "Construction managers",
-}
-
-BLANK = "BLANK"
-UNPARSEABLE = "UNPARSEABLE"
-
-
-def parse_code(value) -> int | str:
-    """Return the census code as an int, or BLANK / UNPARSEABLE.
-
-    Accepts "6230", "06230", "6230.0", 6230. A non-numeric value is never
-    guessed at -- it comes back as UNPARSEABLE and is reported.
-    """
-    text = _norm_value(value)
-    if not text:
-        return BLANK
-    match = re.fullmatch(r"(\d{1,5})(?:\.0+)?", text)
-    if match:
-        return int(match.group(1))
-    return UNPARSEABLE
-
-
-def build_ranges(include_extraction: bool, include_managers: bool) -> list[tuple[int, int]]:
-    ranges = [CONSTRUCTION_TRADES]
-    if include_extraction:
-        ranges.append(EXTRACTION_WORKERS)
-    if include_managers:
-        ranges.append(CONSTRUCTION_MANAGERS)
-    return sorted(ranges)
-
-
-def in_ranges(code: int, ranges) -> bool:
-    return any(low <= code <= high for low, high in ranges)
-
-
-def describe_ranges(ranges) -> str:
-    return ", ".join(f"{low}-{high}" if low != high else str(low) for low, high in ranges)
 
 
 def find_census_column(columns, override: str | None = None) -> str:
@@ -195,7 +121,7 @@ def filter_construction(
 
     Returns a dict with the manifests, per-file counts and the code breakdown.
     """
-    ranges = build_ranges(include_extraction, include_managers)
+    ranges = build_construction_ranges(include_extraction, include_managers)
     files = collect_inputs(inputs)
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -320,7 +246,7 @@ def filter_construction(
             {
                 "census_2018": str(value),
                 "title": (
-                    CENSUS_2018_TITLES.get(value, "")
+                    census_title(value)
                     if isinstance(value, int)
                     else ""
                 ),
@@ -384,7 +310,7 @@ def filter_construction(
 
 
 def inspect(files, args) -> None:
-    ranges = build_ranges(args.include_extraction, args.include_managers)
+    ranges = build_construction_ranges(args.include_extraction, args.include_managers)
     print(f"construction codes: {describe_ranges(ranges)}")
     for path in files:
         header = read_csv(path, args.encoding, nrows=0)
@@ -414,7 +340,7 @@ def inspect(files, args) -> None:
             (v for v in counts if isinstance(v, int) and in_ranges(v, ranges))
         )
         for code in present:
-            title = CENSUS_2018_TITLES.get(code, "(not in local title table)")
+            title = census_title(code) or "(not in local title table)"
             print(f"    {code}  {counts[code]:>8,}  {title}")
 
 

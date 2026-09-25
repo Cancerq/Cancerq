@@ -251,9 +251,10 @@ FIGURE_TEXT = {
         "title_panel": "NVDRS 自杀 case 的州分布 · {panel_year} 面板（{years}）",
         "subtitle_panel": ("只看 {panel_year} 年 NVDRS 已覆盖的 {n} 个辖区（{composition}）；"
                            "灰色 = 没有 case 或不在面板"),
-        "legend_title": "自杀 case 数（{years}）",
-        "no_data": "无数据（0 例）",
-        "out_of_scope": "不在 {panel_year} 面板",
+        # 图例固定用英文（中文标题 + 英文图例），改回中文就把这三行换成中文
+        "legend_title": "Suicide cases ({years})",
+        "no_data": "No data (0 cases)",
+        "out_of_scope": "Outside the {panel_year} panel",
         "footnote": ("数据：NVDRS 自杀 case，{years}；州 = InjuryState（空白时用 SiteID）。"
                      "州名单与 {panel_year} 面板口径来自 {panel_file}。合计 {total} 例。"),
         "states": "州",

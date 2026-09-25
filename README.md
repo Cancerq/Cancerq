@@ -881,3 +881,38 @@ Unknown 被当成 FALSE），断言脚本恰好抓到这 3 行、行号正确、
 
 本仓库不包含任何 NVDRS 数据。NVDRS 是限制性使用数据，请不要把数据文件提交进来
 （`.gitignore` 已排除 `*.csv` 与常见数据目录）。
+
+## 自杀率：`run_suicide_rate.py`
+
+```
+自杀率 = NVDRS 死亡数 ÷ (ACS PUMS 人口 ÷ 1000)      按 IncidentYear 对齐
+```
+
+- **分子**：已按 18-67 岁筛好的 NVDRS 行级 CSV（每行一例；已汇总的表可填 `COUNT_COL`）
+- **分母**：ACS PUMS 加权人口（PWGTP 之和），按 年份 × 州 填，原始人数，脚本自己除以 1000
+
+配置区三处空白：
+
+```python
+NVDRS_FILES = [ r"D:\...\NVDRS_18_67_2018_2024.csv" ]   # 输入
+OUTPUT_DIR  = r"D:\...\Suicide_rate"                    # 输出
+ACS_FILE    = r"D:\...\acs_pums_by_year_state.csv"      # 分母：year, state, population
+# 或者不用文件，直接填 ACS_TABLE = {2018: {"AK": ..., "CO": ...}, ...}
+```
+
+`state` 写 FIPS（ACS 的 `ST`，如 `06`）、缩写（`CA`）、全名（`California`）都可以。
+分母还没准备好就先留空运行一次，脚本会写出 `acs_denominator_template.csv`，
+里面列好了所有需要的 年份 × 州，填上 population 即可。
+
+两张结果表：
+
+| 文件 | 内容 | 州范围 |
+|---|---|---|
+| `A_rate_2018_2024_2018_states.csv` | 2018-2024 各年自杀率 | 2018 年 NVDRS 覆盖的州（分子分母都只算这些州） |
+| `B_rate_2024_all_states.csv` | 2024 年单年自杀率 | 2024 年 NVDRS 覆盖的全部州 |
+
+另有 `B_rate_2024_by_state.csv`、`detail_by_year_state.csv`、`state_coverage.csv`、
+`funnel.csv`，以及合在一起的 `suicide_rates.xlsx`（需 openpyxl）。
+
+某个州某年缺 ACS 分母时，那一行的率**留空**并在 `missing_acs_states` 列写明，不会当 0 加进去少算分母。
+想要每 10 万人：把 `DENOMINATOR_SCALE` 改成 `100000`。

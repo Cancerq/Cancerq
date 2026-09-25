@@ -105,9 +105,11 @@ MAP_STYLE = "geo"
 # 配色主题："light" / "dark" / "both"
 THEME = "light"
 
-# 图上文字的语言。"auto" = 系统有中文字体就用中文，没有就换英文（避免变成方块豆腐）
-#                 "zh" = 强制中文    "en" = 强制英文
-FIGURE_LANG = "auto"
+# 图上文字（标题、副标题、图例、脚注）的语言。默认英文。
+#   "en" = 全英文（默认）
+#   "zh" = 中文标题 + 英文图例（系统得有中文字体）
+#   "auto" = 有中文字体就按 "zh" 来，没有就退回英文（不会画出方块豆腐）
+FIGURE_LANG = "en"
 
 # 图上每个州标 USPS 缩写 + case 数（关掉就只标缩写）
 ANNOTATE_COUNTS = True

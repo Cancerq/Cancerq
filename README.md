@@ -953,8 +953,9 @@ OUTPUT_DIR/
   轮廓，公有领域），**不联网、不需要 geopandas**。只用 pandas + matplotlib。
 - `--map-style grid` 另出一版等面积方块图（一州一格），小州不会被大州压掉；
   `--map-style both` 两种都出。`--theme dark` 出深色版。
-- 图上文字默认跟随系统字体：**找不到中文字体就自动换成英文**，不会画出一排方块。
-  `--figure-lang zh|en` 可以强制。
+- 图上文字（标题、副标题、图例、脚注）**默认全英文**。`--figure-lang zh` 换成中文标题
+  （图例仍是英文）；`--figure-lang auto` 则是系统有中文字体才用中文，没有就退回英文，
+  不会画出一排方块。屏幕上的日志始终是中文，只有图里的文字受这个开关影响。
 
 ```bash
 python nvdrs_state_map.py --map-style both --theme both      # 四张图

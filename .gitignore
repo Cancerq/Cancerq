@@ -13,6 +13,10 @@ tests/sample_data/
 # Rules templates are configuration, not data.
 !config/*.json
 
+# The state-coverage panel is configuration too: one row per jurisdiction-year,
+# no case-level information in it.
+!config/*.csv
+
 __pycache__/
 *.py[cod]
 .venv/

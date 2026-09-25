@@ -27,6 +27,9 @@ python nvdrs_split.py --input age_chunks/ --output-dir out/
 
 # 第 4 步：核对派生的布尔列
 python verify_circumstance.py --input out/labeled/ --mismatches-only
+
+# 第 5 步（独立）：自杀 case 的州分布表 + 两张 2018-2024 分布图
+python nvdrs_state_map.py --input-dir filtered/ --output-dir state_map/
 ```
 
 先筛年份再切年龄，后面每一步处理的数据量都小一截。
@@ -849,6 +852,7 @@ python tests/test_run_electrician_split.py
 python tests/test_split_by_year.py
 python tests/test_run_electrician_by_year.py
 python tests/test_run_electrician_pipeline.py
+python tests/test_nvdrs_state_map.py
 ```
 
 `test_nvdrs_split.py` 覆盖：编码路径与关键词路径的分类正确性、`Yes/No/Unknown/空`
@@ -872,10 +876,91 @@ Unknown 被当成 FALSE），断言脚本恰好抓到这 3 行、行号正确、
 进独立文件、非数字码不被当成建筑、三个清单可回喂作输入、拒绝 2010 码列、不同 chunk-size
 输出一致。
 
+`test_nvdrs_state_map.py` 覆盖：`InjuryState` 与 `SiteID` 打架时选对列、空白才退回
+`SiteID`、州名 / USPS / FIPS / `Alabama (AL)` 各种写法都能认、认不出的取值被报出而不是
+静默丢弃、他杀与未定性不算自杀、编码型死亡方式不瞎猜、2017/2025 被排除、计数表 51 行
+齐全（没有 case 的州留 0）、面板表恰好等于面板 CSV 里 `in_panel=1` 的 36 个辖区、
+方块图与州界文件都正好覆盖这 51 个辖区、分档首尾相接、只有 `DeathState` 时报错并点名、
+不同 chunk-size 结果一致。
+
 `test_split_by_age.py` 用 0–100 每个年龄各一行来逐个验证边界：各段恰好 10 行、合起来
 正好覆盖 18–67、17 和 68 被排除、没有行进两个文件、写入+排除等于读入、不同 chunk-size
 输出完全一致、表头只写一次、拒绝分类年龄列、拒绝表头不一致的合并、gzip 与普通输出内容
 相同。
+
+## 自杀 case 的州分布 —— `nvdrs_state_map.py`
+
+回答三件事，一次跑完：
+
+1. **2018-2024 年 NVDRS 的自杀 case 都来自哪些州**（表）
+2. **全部 50 州 + DC 的分布图**，没有数据的州画灰色
+3. **2018 年 NVDRS 已覆盖的 35 州 + DC 的分布图**，没有数据的州同样画灰色
+
+```bash
+pip install pandas matplotlib
+
+# 填好配置区的 INPUT_DIR / OUTPUT_DIR 后直接运行
+python nvdrs_state_map.py
+
+# 或命令行
+python nvdrs_state_map.py --input-dir "D:\...\nvdrs" --output-dir "D:\...\State_map"
+```
+
+### 州是怎么判断的
+
+每行先看 **`InjuryState`**；这一列空白、`Unknown`、或者认不出来时，才退回
+**`SiteID`**（按州 FIPS 解）。两列都有值时**以 `InjuryState` 为准**——跨州案例里
+（在 A 州受伤、送到 B 州死亡）二者可能不同，测试里构造了打架的数据验证选对了。
+`DeathState` / `ResidenceState` 绝不会被拿来顶替，只有在报错信息里被点名。
+
+州名、USPS、FIPS、以及「哪 36 个辖区算 2018 面板」全部来自
+`config/panel36_filter_key_2018_2024.csv` 的 `in_panel` 列（`in_panel=1` 的正好
+35 州 + DC），脚本里**没有另写一份州名单**——面板文件改了，表和图跟着改。
+
+自杀的筛法：默认自动找死亡方式列（`AbstractorAssignedDeathManner` 等），取值里含
+`suicide` 就算。数据是编码（1/2/3…）时必须自己给出取值，脚本不猜：
+
+```bash
+python nvdrs_state_map.py --manner-col MannerOfDeath --suicide-values 2
+python nvdrs_state_map.py --suicide-filter off      # 输入已经只剩自杀 case
+```
+
+### 输出
+
+```
+OUTPUT_DIR/
+  state_year_counts.csv            51 个辖区 × 2018-2024 计数（没有 case 的也留 0 行）
+  states_with_cases.csv            有 case 的州，按总数排序  ← 问题 1 的答案
+  states_without_cases.csv         没有 case 的州（图上灰色的那些）
+  panel36_state_year_counts.csv    只含 2018 面板的 36 个辖区
+  state_source_counts.csv          每行的州是从 InjuryState 还是 SiteID 认出来的
+  unresolved_state_values.csv      认不出来的州取值，逐个列出
+  funnel.csv                       读入 -> 计入 的逐级交代
+  map_all_states_2018_2024.png     图 2：全部 50 州 + DC
+  map_panel36_2018_2024.png        图 3：2018 面板 35 州 + DC
+```
+
+跑完屏幕上会打出州名单、逐级筛选，以及两个值得回头看一眼的提示：**有 case 但
+`in_panel=0` 的州**（多半是后来才加入、或只覆盖部分县），和**在面板里却一个 case
+都没有的州**（多半是导出或列名出了问题）。
+
+### 图长什么样
+
+- 颜色深浅 = 该州 2018-2024 的自杀 case 总数，按分位数分 5 档（单色蓝，浅→深）。
+  每个州都直接标了 `缩写 + 数字`，不用靠颜色猜数量；东北角几个小州的标签用引线拉到图外。
+- **灰色 = 没有数据**。面板图里另有一档更浅的灰 = 不在 2018 面板。
+- 州界用仓库自带的 `assets/us_states_lowres.geojson`（由 Census TIGER 派生的低精度
+  轮廓，公有领域），**不联网、不需要 geopandas**。只用 pandas + matplotlib。
+- `--map-style grid` 另出一版等面积方块图（一州一格），小州不会被大州压掉；
+  `--map-style both` 两种都出。`--theme dark` 出深色版。
+- 图上文字默认跟随系统字体：**找不到中文字体就自动换成英文**，不会画出一排方块。
+  `--figure-lang zh|en` 可以强制。
+
+```bash
+python nvdrs_state_map.py --map-style both --theme both      # 四张图
+python nvdrs_state_map.py --state-source site_only           # 只认 SiteID
+python nvdrs_state_map.py --bins 4 --no-counts               # 4 档、图上不标数字
+```
 
 ## 注意
 

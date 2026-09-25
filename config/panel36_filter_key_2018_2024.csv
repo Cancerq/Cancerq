@@ -1,0 +1,358 @@
+year,jurisdiction,usps,state_fips,in_panel,coverage_code,weight
+2018,Alabama,AL,1,1,X,1.0
+2019,Alabama,AL,1,1,X,1.0
+2020,Alabama,AL,1,1,X,1.0
+2021,Alabama,AL,1,1,X,1.0
+2022,Alabama,AL,1,1,X,1.0
+2023,Alabama,AL,1,1,assumed_X,1.0
+2024,Alabama,AL,1,1,assumed_X,1.0
+2018,Alaska,AK,2,1,X,1.0
+2019,Alaska,AK,2,1,X,1.0
+2020,Alaska,AK,2,1,X,1.0
+2021,Alaska,AK,2,1,X,1.0
+2022,Alaska,AK,2,1,X,1.0
+2023,Alaska,AK,2,1,assumed_X,1.0
+2024,Alaska,AK,2,1,assumed_X,1.0
+2018,Arizona,AZ,4,1,X,1.0
+2019,Arizona,AZ,4,1,X,1.0
+2020,Arizona,AZ,4,1,X,1.0
+2021,Arizona,AZ,4,1,X,1.0
+2022,Arizona,AZ,4,1,X,1.0
+2023,Arizona,AZ,4,1,assumed_X,1.0
+2024,Arizona,AZ,4,1,assumed_X,1.0
+2018,Arkansas,AR,5,0,none,0.0
+2019,Arkansas,AR,5,0,none,0.0
+2020,Arkansas,AR,5,0,X,0.0
+2021,Arkansas,AR,5,0,X,0.0
+2022,Arkansas,AR,5,0,X,0.0
+2023,Arkansas,AR,5,0,assumed_X,0.0
+2024,Arkansas,AR,5,0,assumed_X,0.0
+2018,California,CA,6,0,XP,0.0
+2019,California,CA,6,0,XP,0.0
+2020,California,CA,6,0,XP,0.0
+2021,California,CA,6,0,XP,0.0
+2022,California,CA,6,0,XP,0.0
+2023,California,CA,6,0,assumed_X,0.0
+2024,California,CA,6,0,assumed_X,0.0
+2018,Colorado,CO,8,1,X,1.0
+2019,Colorado,CO,8,1,X,1.0
+2020,Colorado,CO,8,1,X,1.0
+2021,Colorado,CO,8,1,X,1.0
+2022,Colorado,CO,8,1,X,1.0
+2023,Colorado,CO,8,1,assumed_X,1.0
+2024,Colorado,CO,8,1,assumed_X,1.0
+2018,Connecticut,CT,9,1,X,1.0
+2019,Connecticut,CT,9,1,X,1.0
+2020,Connecticut,CT,9,1,X,1.0
+2021,Connecticut,CT,9,1,X,1.0
+2022,Connecticut,CT,9,1,X,1.0
+2023,Connecticut,CT,9,1,assumed_X,1.0
+2024,Connecticut,CT,9,1,assumed_X,1.0
+2018,Delaware,DE,10,1,X,1.0
+2019,Delaware,DE,10,1,X,1.0
+2020,Delaware,DE,10,1,X,1.0
+2021,Delaware,DE,10,1,X,1.0
+2022,Delaware,DE,10,1,X,1.0
+2023,Delaware,DE,10,1,assumed_X,1.0
+2024,Delaware,DE,10,1,assumed_X,1.0
+2018,District of Columbia,DC,11,1,X,1.0
+2019,District of Columbia,DC,11,1,X,1.0
+2020,District of Columbia,DC,11,1,X,1.0
+2021,District of Columbia,DC,11,1,X,1.0
+2022,District of Columbia,DC,11,1,X,1.0
+2023,District of Columbia,DC,11,1,assumed_X,1.0
+2024,District of Columbia,DC,11,1,assumed_X,1.0
+2018,Florida,FL,12,0,none,0.0
+2019,Florida,FL,12,0,none,0.0
+2020,Florida,FL,12,0,0,0.0
+2021,Florida,FL,12,0,0,0.0
+2022,Florida,FL,12,0,XP,0.0
+2023,Florida,FL,12,0,assumed_X,0.0
+2024,Florida,FL,12,0,assumed_X,0.0
+2018,Georgia,GA,13,1,X,1.0
+2019,Georgia,GA,13,1,X,1.0
+2020,Georgia,GA,13,1,X,1.0
+2021,Georgia,GA,13,1,X,1.0
+2022,Georgia,GA,13,1,X,1.0
+2023,Georgia,GA,13,1,assumed_X,1.0
+2024,Georgia,GA,13,1,assumed_X,1.0
+2018,Hawaii,HI,15,0,0,0.0
+2019,Hawaii,HI,15,0,X,0.0
+2020,Hawaii,HI,15,0,0,0.0
+2021,Hawaii,HI,15,0,0,0.0
+2022,Hawaii,HI,15,0,X,0.0
+2023,Hawaii,HI,15,0,assumed_X,0.0
+2024,Hawaii,HI,15,0,assumed_X,0.0
+2018,Idaho,ID,16,0,none,0.0
+2019,Idaho,ID,16,0,none,0.0
+2020,Idaho,ID,16,0,X,0.0
+2021,Idaho,ID,16,0,X,0.0
+2022,Idaho,ID,16,0,X,0.0
+2023,Idaho,ID,16,0,assumed_X,0.0
+2024,Idaho,ID,16,0,assumed_X,0.0
+2018,Illinois,IL,17,0,XP,0.0
+2019,Illinois,IL,17,0,XP,0.0
+2020,Illinois,IL,17,0,X,0.0
+2021,Illinois,IL,17,0,X,0.0
+2022,Illinois,IL,17,0,X,0.0
+2023,Illinois,IL,17,0,assumed_X,0.0
+2024,Illinois,IL,17,0,assumed_X,0.0
+2018,Indiana,IN,18,1,X,1.0
+2019,Indiana,IN,18,1,X,1.0
+2020,Indiana,IN,18,1,X,1.0
+2021,Indiana,IN,18,1,X,1.0
+2022,Indiana,IN,18,1,X,1.0
+2023,Indiana,IN,18,1,assumed_X,1.0
+2024,Indiana,IN,18,1,assumed_X,1.0
+2018,Iowa,IA,19,1,X,1.0
+2019,Iowa,IA,19,1,X,1.0
+2020,Iowa,IA,19,1,X,1.0
+2021,Iowa,IA,19,1,X,1.0
+2022,Iowa,IA,19,1,X,1.0
+2023,Iowa,IA,19,1,assumed_X,1.0
+2024,Iowa,IA,19,1,assumed_X,1.0
+2018,Kansas,KS,20,1,X,1.0
+2019,Kansas,KS,20,1,X,1.0
+2020,Kansas,KS,20,1,X,1.0
+2021,Kansas,KS,20,1,X,1.0
+2022,Kansas,KS,20,1,X,1.0
+2023,Kansas,KS,20,1,assumed_X,1.0
+2024,Kansas,KS,20,1,assumed_X,1.0
+2018,Kentucky,KY,21,1,X,1.0
+2019,Kentucky,KY,21,1,X,1.0
+2020,Kentucky,KY,21,1,X,1.0
+2021,Kentucky,KY,21,1,X,1.0
+2022,Kentucky,KY,21,1,X,1.0
+2023,Kentucky,KY,21,1,assumed_X,1.0
+2024,Kentucky,KY,21,1,assumed_X,1.0
+2018,Louisiana,LA,22,1,X,1.0
+2019,Louisiana,LA,22,1,X,1.0
+2020,Louisiana,LA,22,1,X,1.0
+2021,Louisiana,LA,22,1,X,1.0
+2022,Louisiana,LA,22,1,X,1.0
+2023,Louisiana,LA,22,1,assumed_X,1.0
+2024,Louisiana,LA,22,1,assumed_X,1.0
+2018,Maine,ME,23,1,X,1.0
+2019,Maine,ME,23,1,X,1.0
+2020,Maine,ME,23,1,X,1.0
+2021,Maine,ME,23,1,X,1.0
+2022,Maine,ME,23,1,X,1.0
+2023,Maine,ME,23,1,assumed_X,1.0
+2024,Maine,ME,23,1,assumed_X,1.0
+2018,Maryland,MD,24,1,X,1.0
+2019,Maryland,MD,24,1,X,1.0
+2020,Maryland,MD,24,1,X,1.0
+2021,Maryland,MD,24,1,X,1.0
+2022,Maryland,MD,24,1,X,1.0
+2023,Maryland,MD,24,1,assumed_X,1.0
+2024,Maryland,MD,24,1,assumed_X,1.0
+2018,Massachusetts,MA,25,1,X,1.0
+2019,Massachusetts,MA,25,1,X,1.0
+2020,Massachusetts,MA,25,1,X,1.0
+2021,Massachusetts,MA,25,1,X,1.0
+2022,Massachusetts,MA,25,1,X,1.0
+2023,Massachusetts,MA,25,1,assumed_X,1.0
+2024,Massachusetts,MA,25,1,assumed_X,1.0
+2018,Michigan,MI,26,1,X,1.0
+2019,Michigan,MI,26,1,X,1.0
+2020,Michigan,MI,26,1,X,1.0
+2021,Michigan,MI,26,1,X,1.0
+2022,Michigan,MI,26,1,X,1.0
+2023,Michigan,MI,26,1,assumed_X,1.0
+2024,Michigan,MI,26,1,assumed_X,1.0
+2018,Minnesota,MN,27,1,X,1.0
+2019,Minnesota,MN,27,1,X,1.0
+2020,Minnesota,MN,27,1,X,1.0
+2021,Minnesota,MN,27,1,X,1.0
+2022,Minnesota,MN,27,1,X,1.0
+2023,Minnesota,MN,27,1,assumed_X,1.0
+2024,Minnesota,MN,27,1,assumed_X,1.0
+2018,Mississippi,MS,28,0,none,0.0
+2019,Mississippi,MS,28,0,none,0.0
+2020,Mississippi,MS,28,0,X,0.0
+2021,Mississippi,MS,28,0,X,0.0
+2022,Mississippi,MS,28,0,X,0.0
+2023,Mississippi,MS,28,0,assumed_X,0.0
+2024,Mississippi,MS,28,0,assumed_X,0.0
+2018,Missouri,MO,29,1,X,1.0
+2019,Missouri,MO,29,1,X,1.0
+2020,Missouri,MO,29,1,X,1.0
+2021,Missouri,MO,29,1,X,1.0
+2022,Missouri,MO,29,1,X,1.0
+2023,Missouri,MO,29,1,assumed_X,1.0
+2024,Missouri,MO,29,1,assumed_X,1.0
+2018,Montana,MT,30,0,none,0.0
+2019,Montana,MT,30,0,X,0.0
+2020,Montana,MT,30,0,X,0.0
+2021,Montana,MT,30,0,X,0.0
+2022,Montana,MT,30,0,X,0.0
+2023,Montana,MT,30,0,assumed_X,0.0
+2024,Montana,MT,30,0,assumed_X,0.0
+2018,Nebraska,NE,31,1,X,1.0
+2019,Nebraska,NE,31,1,X,1.0
+2020,Nebraska,NE,31,1,X,1.0
+2021,Nebraska,NE,31,1,X,1.0
+2022,Nebraska,NE,31,1,X,1.0
+2023,Nebraska,NE,31,1,assumed_X,1.0
+2024,Nebraska,NE,31,1,assumed_X,1.0
+2018,Nevada,NV,32,1,X,1.0
+2019,Nevada,NV,32,1,X,1.0
+2020,Nevada,NV,32,1,X,1.0
+2021,Nevada,NV,32,1,X,1.0
+2022,Nevada,NV,32,1,X,1.0
+2023,Nevada,NV,32,1,assumed_X,1.0
+2024,Nevada,NV,32,1,assumed_X,1.0
+2018,New Hampshire,NH,33,1,X,1.0
+2019,New Hampshire,NH,33,1,X,1.0
+2020,New Hampshire,NH,33,1,X,1.0
+2021,New Hampshire,NH,33,1,X,1.0
+2022,New Hampshire,NH,33,1,X,1.0
+2023,New Hampshire,NH,33,1,assumed_X,1.0
+2024,New Hampshire,NH,33,1,assumed_X,1.0
+2018,New Jersey,NJ,34,1,X,1.0
+2019,New Jersey,NJ,34,1,X,1.0
+2020,New Jersey,NJ,34,1,X,1.0
+2021,New Jersey,NJ,34,1,X,1.0
+2022,New Jersey,NJ,34,1,X,1.0
+2023,New Jersey,NJ,34,1,assumed_X,1.0
+2024,New Jersey,NJ,34,1,assumed_X,1.0
+2018,New Mexico,NM,35,1,X,1.0
+2019,New Mexico,NM,35,1,X,1.0
+2020,New Mexico,NM,35,1,X,1.0
+2021,New Mexico,NM,35,1,X,1.0
+2022,New Mexico,NM,35,1,X,1.0
+2023,New Mexico,NM,35,1,assumed_X,1.0
+2024,New Mexico,NM,35,1,assumed_X,1.0
+2018,New York,NY,36,0,X,0.0
+2019,New York,NY,36,0,0,0.0
+2020,New York,NY,36,0,X,0.0
+2021,New York,NY,36,0,X,0.0
+2022,New York,NY,36,0,X,0.0
+2023,New York,NY,36,0,assumed_X,0.0
+2024,New York,NY,36,0,assumed_X,0.0
+2018,North Carolina,NC,37,1,X,1.0
+2019,North Carolina,NC,37,1,X,1.0
+2020,North Carolina,NC,37,1,X,1.0
+2021,North Carolina,NC,37,1,X,1.0
+2022,North Carolina,NC,37,1,X,1.0
+2023,North Carolina,NC,37,1,assumed_X,1.0
+2024,North Carolina,NC,37,1,assumed_X,1.0
+2018,North Dakota,ND,38,0,none,0.0
+2019,North Dakota,ND,38,0,X,0.0
+2020,North Dakota,ND,38,0,X,0.0
+2021,North Dakota,ND,38,0,X,0.0
+2022,North Dakota,ND,38,0,X,0.0
+2023,North Dakota,ND,38,0,assumed_X,0.0
+2024,North Dakota,ND,38,0,assumed_X,0.0
+2018,Ohio,OH,39,1,X,1.0
+2019,Ohio,OH,39,1,X,1.0
+2020,Ohio,OH,39,1,X,1.0
+2021,Ohio,OH,39,1,X,1.0
+2022,Ohio,OH,39,1,X,1.0
+2023,Ohio,OH,39,1,assumed_X,1.0
+2024,Ohio,OH,39,1,assumed_X,1.0
+2018,Oklahoma,OK,40,1,X,1.0
+2019,Oklahoma,OK,40,1,X,1.0
+2020,Oklahoma,OK,40,1,X,1.0
+2021,Oklahoma,OK,40,1,X,1.0
+2022,Oklahoma,OK,40,1,X,1.0
+2023,Oklahoma,OK,40,1,assumed_X,1.0
+2024,Oklahoma,OK,40,1,assumed_X,1.0
+2018,Oregon,OR,41,1,X,1.0
+2019,Oregon,OR,41,1,X,1.0
+2020,Oregon,OR,41,1,X,1.0
+2021,Oregon,OR,41,1,X,1.0
+2022,Oregon,OR,41,1,X,1.0
+2023,Oregon,OR,41,1,assumed_X,1.0
+2024,Oregon,OR,41,1,assumed_X,1.0
+2018,Pennsylvania,PA,42,0,XP,0.0
+2019,Pennsylvania,PA,42,0,XP,0.0
+2020,Pennsylvania,PA,42,0,X,0.0
+2021,Pennsylvania,PA,42,0,X,0.0
+2022,Pennsylvania,PA,42,0,X,0.0
+2023,Pennsylvania,PA,42,0,assumed_X,0.0
+2024,Pennsylvania,PA,42,0,assumed_X,0.0
+2018,Rhode Island,RI,44,1,X,1.0
+2019,Rhode Island,RI,44,1,X,1.0
+2020,Rhode Island,RI,44,1,X,1.0
+2021,Rhode Island,RI,44,1,X,1.0
+2022,Rhode Island,RI,44,1,X,1.0
+2023,Rhode Island,RI,44,1,assumed_X,1.0
+2024,Rhode Island,RI,44,1,assumed_X,1.0
+2018,South Carolina,SC,45,1,X,1.0
+2019,South Carolina,SC,45,1,X,1.0
+2020,South Carolina,SC,45,1,X,1.0
+2021,South Carolina,SC,45,1,X,1.0
+2022,South Carolina,SC,45,1,X,1.0
+2023,South Carolina,SC,45,1,assumed_X,1.0
+2024,South Carolina,SC,45,1,assumed_X,1.0
+2018,South Dakota,SD,46,0,none,0.0
+2019,South Dakota,SD,46,0,none,0.0
+2020,South Dakota,SD,46,0,X,0.0
+2021,South Dakota,SD,46,0,X,0.0
+2022,South Dakota,SD,46,0,X,0.0
+2023,South Dakota,SD,46,0,assumed_X,0.0
+2024,South Dakota,SD,46,0,assumed_X,0.0
+2018,Tennessee,TN,47,0,none,0.0
+2019,Tennessee,TN,47,0,none,0.0
+2020,Tennessee,TN,47,0,X,0.0
+2021,Tennessee,TN,47,0,X,0.0
+2022,Tennessee,TN,47,0,X,0.0
+2023,Tennessee,TN,47,0,assumed_X,0.0
+2024,Tennessee,TN,47,0,assumed_X,0.0
+2018,Texas,TX,48,0,none,0.0
+2019,Texas,TX,48,0,none,0.0
+2020,Texas,TX,48,0,XP,0.0
+2021,Texas,TX,48,0,XP,0.0
+2022,Texas,TX,48,0,XP,0.0
+2023,Texas,TX,48,0,assumed_X,0.0
+2024,Texas,TX,48,0,assumed_X,0.0
+2018,Utah,UT,49,1,X,1.0
+2019,Utah,UT,49,1,X,1.0
+2020,Utah,UT,49,1,X,1.0
+2021,Utah,UT,49,1,X,1.0
+2022,Utah,UT,49,1,X,1.0
+2023,Utah,UT,49,1,assumed_X,1.0
+2024,Utah,UT,49,1,assumed_X,1.0
+2018,Vermont,VT,50,1,X,1.0
+2019,Vermont,VT,50,1,X,1.0
+2020,Vermont,VT,50,1,X,1.0
+2021,Vermont,VT,50,1,X,1.0
+2022,Vermont,VT,50,1,X,1.0
+2023,Vermont,VT,50,1,assumed_X,1.0
+2024,Vermont,VT,50,1,assumed_X,1.0
+2018,Virginia,VA,51,1,X,1.0
+2019,Virginia,VA,51,1,X,1.0
+2020,Virginia,VA,51,1,X,1.0
+2021,Virginia,VA,51,1,X,1.0
+2022,Virginia,VA,51,1,X,1.0
+2023,Virginia,VA,51,1,assumed_X,1.0
+2024,Virginia,VA,51,1,assumed_X,1.0
+2018,Washington,WA,53,1,X,1.0
+2019,Washington,WA,53,1,X,1.0
+2020,Washington,WA,53,1,X,1.0
+2021,Washington,WA,53,1,X,1.0
+2022,Washington,WA,53,1,X,1.0
+2023,Washington,WA,53,1,assumed_X,1.0
+2024,Washington,WA,53,1,assumed_X,1.0
+2018,West Virginia,WV,54,1,X,1.0
+2019,West Virginia,WV,54,1,X,1.0
+2020,West Virginia,WV,54,1,X,1.0
+2021,West Virginia,WV,54,1,X,1.0
+2022,West Virginia,WV,54,1,X,1.0
+2023,West Virginia,WV,54,1,assumed_X,1.0
+2024,West Virginia,WV,54,1,assumed_X,1.0
+2018,Wisconsin,WI,55,1,X,1.0
+2019,Wisconsin,WI,55,1,X,1.0
+2020,Wisconsin,WI,55,1,X,1.0
+2021,Wisconsin,WI,55,1,X,1.0
+2022,Wisconsin,WI,55,1,X,1.0
+2023,Wisconsin,WI,55,1,assumed_X,1.0
+2024,Wisconsin,WI,55,1,assumed_X,1.0
+2018,Wyoming,WY,56,0,none,0.0
+2019,Wyoming,WY,56,0,X,0.0
+2020,Wyoming,WY,56,0,X,0.0
+2021,Wyoming,WY,56,0,X,0.0
+2022,Wyoming,WY,56,0,X,0.0
+2023,Wyoming,WY,56,0,assumed_X,0.0
+2024,Wyoming,WY,56,0,assumed_X,0.0

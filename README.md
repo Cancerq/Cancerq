@@ -889,31 +889,40 @@ Unknown 被当成 FALSE），断言脚本恰好抓到这 3 行、行号正确、
 ```
 
 - **分子**：已按 18-67 岁筛好的 NVDRS 行级 CSV（每行一例；已汇总的表可填 `COUNT_COL`）
-- **分母**：ACS PUMS 加权人口（PWGTP 之和），按 年份 × 州 填，原始人数，脚本自己除以 1000
-- 编码自动识别（UTF-8 / GBK / Windows-1252），Excel 存的 CSV 或直接 .xlsx 都能读；分母表头可以写中文（年份 / 州 / 人口）
+- **分母**：直接读 `acs_pums_2018_2024_all_workers_nvdrs_rad_coverage_weighted.xlsx`
+  —— 自动找到 `State coverage detail` 工作表（表头在第 5 行），用
+  `Year` / `Jurisdiction` / `Coverage-weighted employed population`
+  （部分覆盖的 CA / IL / PA / TX / FL 已乘覆盖比例）
+- 也能读自己整理的 CSV 长表 `year, state, population`；编码自动识别（UTF-8 / GBK），表头可写中文
 
 配置区三处空白：
 
 ```python
 NVDRS_FILES = [ r"D:\...\NVDRS_18_67_2018_2024.csv" ]   # 输入
 OUTPUT_DIR  = r"D:\...\Suicide_rate"                    # 输出
-ACS_FILE    = r"D:\...\acs_pums_by_year_state.csv"      # 分母：year, state, population
-# 或者不用文件，直接填 ACS_TABLE = {2018: {"AK": ..., "CO": ...}, ...}
+ACS_FILE    = r"D:\...\acs_pums_2018_2024_all_workers_nvdrs_rad_coverage_weighted.xlsx"
 ```
-
-`state` 写 FIPS（ACS 的 `ST`，如 `06`）、缩写（`CA`）、全名（`California`）都可以。
-分母还没准备好就先留空运行一次，脚本会写出 `acs_denominator_template.csv`，
-里面列好了所有需要的 年份 × 州，填上 population 即可。
 
 两张结果表：
 
 | 文件 | 内容 | 州范围 |
 |---|---|---|
-| `A_rate_2018_2024_2018_states.csv` | 2018-2024 各年自杀率 | 2018 年 NVDRS 覆盖的州（分子分母都只算这些州） |
-| `B_rate_2024_all_states.csv` | 2024 年单年自杀率 | 2024 年 NVDRS 覆盖的全部州 |
+| `A_rate_2018_2024_2018_states.csv` | 2018-2024 各年自杀率 | 2018 年覆盖的州 ∩ 当年覆盖的州（分子分母同一组州） |
+| `B_rate_2024_all_states.csv` | 2024 年单年自杀率 | 2024 年覆盖的全部州 |
 
-另有 `B_rate_2024_by_state.csv`、`detail_by_year_state.csv`、`state_coverage.csv`、
-`funnel.csv`，以及合在一起的 `suicide_rates.xlsx`（需 openpyxl）。
+「覆盖的州」默认取分母表当年列出的州（`COVERAGE_FROM = "acs"`，即 NVDRS RAD 覆盖名单）；
+分母表列了全部州时改成 `"nvdrs"`，按 NVDRS 数据里出现过的州。
 
-某个州某年缺 ACS 分母时，那一行的率**留空**并在 `missing_acs_states` 列写明，不会当 0 加进去少算分母。
-想要每 10 万人：把 `DENOMINATOR_SCALE` 改成 `100000`。
+表里的核对列：
+
+| 列 | 含义 |
+|---|---|
+| `dropped_from_base` | 2018 年的州当年不在覆盖里（如 New York 2019），分子分母都不算 |
+| `excluded_nvdrs_deaths` / `excluded_states` | NVDRS 有死亡、但当年不在覆盖名单的州，未计入 |
+| `zero_death_states` | 在覆盖名单里、NVDRS 却 0 例 —— 多半是州名/代码对不上 |
+| `missing_acs_states` | 缺分母，率留空（不当 0 加） |
+| `acs_source` | 分母来源；2020 为 ACS 5-year（2016–2020 合并） |
+
+改某格覆盖权重（分母 = Full-state 人口 × 新权重）：
+`ACS_WEIGHT_OVERRIDES = {(2024, "FL"): 1.0}`。
+想要每 10 万人：`DENOMINATOR_SCALE = 100000`。

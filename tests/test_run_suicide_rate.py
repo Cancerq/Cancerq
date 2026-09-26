@@ -8,6 +8,10 @@ What would quietly ruin the analysis:
   - a missing ACS cell being summed as 0, understating the denominator
   - FIPS / abbreviation / full-name spellings of one state not matching
   - the ACS population not being divided by 1000 first
+  - the coverage workbook's title rows or its Full-state column being read
+    instead of the Coverage-weighted population
+  - a 2018 state that drops out one year (New York 2019 in the workbook)
+    keeping its denominator, or its deaths, in that year
 
 Run with:  python tests/test_run_suicide_rate.py
 """
@@ -76,12 +80,14 @@ def make_nvdrs(path: Path) -> dict:
     return {"junk": 5}
 
 
-def make_acs(path: Path, drop=None) -> None:
+def make_acs(path: Path, drop=None, tx_every_year=False) -> None:
+    """A coverage file: lists only the states covered each year (TX from 2022)."""
     rows = []
     for year in YEARS:
         rows.append((year, "02", 1000 + year - 2018))     # AK as FIPS
         rows.append((year, "CO", 2000))
-        rows.append((year, "Texas", 10_000))
+        if year >= 2022 or tx_every_year:
+            rows.append((year, "Texas", 10_000))
     frame = pd.DataFrame(rows, columns=["year", "state", "population"])
     if drop:
         frame = frame[~((frame["year"] == drop[0]) & (frame["state"] == drop[1]))]
@@ -150,15 +156,83 @@ def main() -> int:
                      "detail_by_year_state.csv", "state_coverage.csv"):
             check((out / name).is_file(), f"wrote {name}")
 
-        print("\n-- a missing ACS cell leaves the rate blank, never undercounts --")
+        print("\n-- coverage from ACS: a 2018 state drops out one year --")
         acs_gap = workdir / "acs_gap.csv"
         make_acs(acs_gap, drop=(2020, "CO"))
         result, _ = quiet(rsr.run, [str(src)], str(workdir / "out_gap"),
                           acs_file=str(acs_gap))
         a = result["table_a"].set_index("year")
+        check(a.loc[2020, "n_states"] == 1, "2020 uses AK only")
+        check(a.loc[2020, "dropped_from_base"] == "CO", "2020 names CO as dropped")
+        check(a.loc[2020, "nvdrs_deaths"] == 2, "2020 numerator drops CO deaths")
+        check(a.loc[2020, "acs_population"] == 1002, "2020 denominator drops CO")
+        check(a.loc[2020, "excluded_nvdrs_deaths"] == 3, "CO's 3 deaths reported")
+        check(a.loc[2021, "n_states"] == 2, "2021 back to AK, CO")
+
+        print("\n-- coverage from NVDRS: a missing ACS cell blanks the rate --")
+        acs_all = workdir / "acs_all.csv"
+        make_acs(acs_all, drop=(2020, "CO"), tx_every_year=True)
+        result, _ = quiet(rsr.run, [str(src)], str(workdir / "out_nv"),
+                          acs_file=str(acs_all), coverage_from="nvdrs")
+        a = result["table_a"].set_index("year")
+        check(result["base_states"] == ["AK", "CO"], "2018 set from NVDRS = AK, CO")
+        check(a.loc[2019, "acs_population"] == 3001, "TX listed in ACS but not used")
         check(math.isnan(a.loc[2020, "rate_per_1000"]), "2020 rate is blank")
         check(a.loc[2020, "missing_acs_states"] == "CO", "2020 names CO as missing")
         check(not math.isnan(a.loc[2021, "rate_per_1000"]), "2021 still computed")
+
+        print("\n-- the NVDRS RAD coverage workbook format --")
+        book = workdir / "acs_pums_coverage_weighted.xlsx"
+        detail = []
+        for y in YEARS:
+            detail.append((y, "Alaska", 1.0, "statewide", f"{y} ACS 1-year PUMS",
+                           1000 + y - 2018, 1000 + y - 2018, 10))
+            detail.append((y, "Colorado", 0.5, "Partial coverage", f"{y} ACS 1-year PUMS",
+                           4000, 2000, 10))
+            if y >= 2022:
+                detail.append((y, "Texas", 0.5, "Partial coverage",
+                               f"{y} ACS 1-year PUMS", 20_000, 10_000, 10))
+        cols = ["Year", "Jurisdiction", "Coverage weight", "Coverage definition",
+                "ACS PUMS source", "Full-state employed population",
+                "Coverage-weighted employed population",
+                "Unweighted PUMS person records"]
+        with pd.ExcelWriter(book) as xl:
+            pd.DataFrame([["title"], ["Year", "ACS PUMS source"]]).to_excel(
+                xl, sheet_name="Annual summary", index=False, header=False)
+            pd.DataFrame([[None], ["NVDRS RAD coverage weights ..."], ["note"], [None]]
+                         ).to_excel(xl, sheet_name="State coverage detail",
+                                    index=False, header=False)
+            pd.DataFrame(detail, columns=cols).to_excel(
+                xl, sheet_name="State coverage detail", index=False, startrow=4)
+        result, log = quiet(rsr.run, [str(src)], str(workdir / "out_book"),
+                            acs_file=str(book))
+        check("State coverage detail" in log and "第 5 行" in log,
+              "finds the sheet and the header on row 5")
+        b = result["table_b"].iloc[0]
+        check(b["acs_population"] == 13_006, "uses Coverage-weighted, not Full-state")
+        check(math.isclose(b["rate_per_1000"], 10 / 13.006), "workbook B rate")
+        check(result["table_a"]["acs_source"].iloc[0] == "2018 ACS 1-year PUMS",
+              "acs_source carried into table A")
+
+        result, log = quiet(rsr.run, [str(src)], str(workdir / "out_ovr"),
+                            acs_file=str(book), acs_weight_overrides={(2024, "TX"): 1.0})
+        by = result["by_state"].set_index("state")
+        check(by.loc["TX", "acs_population"] == 20_000,
+              "override: TX 2024 = full-state x 1.0")
+        check(result["table_a"].set_index("year").loc[2023, "acs_population"] == 3005,
+              "override touches only the named year x state")
+        msg = expect_exit(rsr.run, [str(src)], str(workdir / "out_bad"),
+                          acs_file=str(book), acs_weight_overrides={(2019, "TX"): 1.0})
+        check("找不到" in msg, "override for an uncovered cell is refused")
+
+        print("\n-- covered state with zero NVDRS deaths is flagged --")
+        acs_extra = workdir / "acs_extra.csv"
+        make_acs(acs_extra)
+        with open(acs_extra, "a", encoding="utf-8") as handle:
+            handle.write("2024,Utah,500\n")
+        result, _ = quiet(rsr.run, [str(src)], str(workdir / "out_zero"),
+                          acs_file=str(acs_extra))
+        check(result["table_b"].iloc[0]["zero_death_states"] == "UT", "UT flagged")
 
         print("\n-- scale --")
         result, _ = quiet(rsr.run, [str(src)], str(workdir / "out_100k"),
@@ -167,7 +241,8 @@ def main() -> int:
                            10 / (13_006 / 100_000)), "per 100,000 when asked")
 
         print("\n-- in-script ACS_TABLE --")
-        table = {y: {"AK": 1000 + y - 2018, "CO": 2000, "TX": 10_000} for y in YEARS}
+        table = {y: {"AK": 1000 + y - 2018, "CO": 2000,
+                     **({"TX": 10_000} if y >= 2022 else {})} for y in YEARS}
         result, _ = quiet(rsr.run, [str(src)], str(workdir / "out_tbl"),
                           acs_table=table)
         check(math.isclose(result["table_b"].iloc[0]["rate_per_1000"], 10 / 13.006),

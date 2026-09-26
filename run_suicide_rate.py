@@ -45,6 +45,7 @@
 from __future__ import annotations
 
 import argparse
+import codecs
 import re
 import sys
 from pathlib import Path
@@ -70,6 +71,7 @@ OUTPUT_DIR = r""     # 例：r"D:\School_project\Project\NVDRS\Suicide_rate"
 #     year        2018 ... 2024
 #     state       州，可以写 FIPS 码（ACS 的 ST 列，如 6 / 06）、缩写（CA）或全名（California）
 #     population  该年该州的 ACS PUMS 加权人口（PWGTP 之和），未除以 1000 的原始人数
+#   也可以直接用 Excel 文件（.xlsx），读第一个工作表
 ACS_FILE = r""       # 例：r"D:\School_project\Project\ACS_PUMS\acs_pums_18_67_by_year_state.csv"
 
 # 方式二：直接填在这里（填了 ACS_FILE 就忽略这个）
@@ -102,7 +104,9 @@ ACS_YEAR_COL = r""
 ACS_STATE_COL = r""
 ACS_POP_COL = r""
 
-ENCODING = "utf-8"
+# CSV 编码。留空 = 自动识别（依次试 UTF-8 / GBK / Windows-1252）。
+# 中文 Windows 上用 Excel「另存为 CSV」存出来的文件通常是 GBK。
+ENCODING = ""
 CHUNK_SIZE = 200_000
 
 # =============================================================================
@@ -117,10 +121,12 @@ WRONG_YEAR_COLS = {"deathyear", "yearofdeath", "injuryyear", "yearofinjury",
 STATE_COL_CANDIDATES = ("sitestate", "state", "incidentstate",
                         "stateabbr", "statecode", "st")
 
-ACS_YEAR_CANDIDATES = ("year", "acsyear", "surveyyear")
-ACS_STATE_CANDIDATES = ("state", "st", "statefips", "stateabbr", "statecode")
+ACS_YEAR_CANDIDATES = ("year", "acsyear", "surveyyear", "年份", "年")
+ACS_STATE_CANDIDATES = ("state", "st", "statefips", "stateabbr", "statecode",
+                        "州", "州名", "州代码")
 ACS_POP_CANDIDATES = ("population", "pop", "pwgtp", "weightedpop",
-                      "weightedpopulation", "denominator", "n")
+                      "weightedpopulation", "denominator", "n",
+                      "人口", "人数", "分母", "加权人口")
 
 # (FIPS, 缩写, 全名) —— 50 州 + DC + PR
 STATES = [
@@ -174,7 +180,7 @@ def norm_text(value) -> str:
 
 
 def norm_colname(name: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", str(name).lower())
+    return re.sub(r"[^a-z0-9\u4e00-\u9fff]", "", str(name).lower().lstrip("\ufeff"))
 
 
 def parse_year(value):
@@ -194,6 +200,29 @@ def parse_state(value):
     return STATE_LOOKUP.get(text)
 
 
+ENCODING_CANDIDATES = ("utf-8-sig", "gbk", "cp1252")
+
+
+def detect_encoding(path: Path, preferred: str = "") -> str:
+    """读文件开头几 MB 试解码；指定了 ENCODING 就先试它。都不行就报错说明。"""
+    with open(path, "rb") as handle:
+        sample = handle.read(4 * 1024 * 1024)
+    tried = []
+    for enc in ([preferred] if preferred else []) + list(ENCODING_CANDIDATES):
+        if enc in tried:
+            continue
+        tried.append(enc)
+        try:
+            # final=False：样本末尾切断的半个多字节字符不算错
+            codecs.getincrementaldecoder(enc)().decode(sample, final=False)
+        except (UnicodeDecodeError, LookupError):
+            continue
+        return enc
+    fail(f"认不出文件编码：\n  {path}\n试过：{', '.join(tried)}。\n"
+         "请用 Excel「另存为」-> 「CSV UTF-8（逗号分隔）」重新保存，"
+         "或在配置区填 ENCODING。")
+
+
 def find_col(columns, candidates, skip=()):
     normalised = {norm_colname(c): c for c in columns if norm_colname(c) not in skip}
     for cand in candidates:
@@ -207,7 +236,7 @@ def find_col(columns, candidates, skip=()):
 # -----------------------------------------------------------------------------
 
 def read_numerator(paths, *, year_col="", state_col="", count_col="",
-                   encoding="utf-8", chunk_size=200_000):
+                   encoding="", chunk_size=200_000):
     """返回 (年份 × 州 死亡数 DataFrame, funnel 列表)。只读需要的列、分块读。"""
     counts: dict[tuple[int, str], float] = {}
     funnel = {"rows_read": 0, "year_unreadable": 0, "year_outside": 0,
@@ -215,7 +244,8 @@ def read_numerator(paths, *, year_col="", state_col="", count_col="",
     bad_states: dict[str, int] = {}
 
     for path in paths:
-        header = pd.read_csv(path, nrows=0, encoding=encoding).columns
+        file_encoding = detect_encoding(path, encoding)
+        header = pd.read_csv(path, nrows=0, encoding=file_encoding).columns
         ycol = year_col or find_col(header, YEAR_COL_CANDIDATES, skip=WRONG_YEAR_COLS)
         scol = state_col or find_col(header, STATE_COL_CANDIDATES)
         for role, col in (("年份", ycol), ("州", scol), ("计数", count_col)):
@@ -228,12 +258,12 @@ def read_numerator(paths, *, year_col="", state_col="", count_col="",
         if not scol:
             fail(f"{path.name}：找不到州列（SiteState / State），请在配置区填 STATE_COL。\n"
                  f"列有：{', '.join(map(str, header))}")
-        print(f"读取 {path.name}   年份列={ycol}  州列={scol}"
+        print(f"读取 {path.name}   编码={file_encoding}  年份列={ycol}  州列={scol}"
               + (f"  计数列={count_col}" if count_col else ""))
 
         usecols = [ycol, scol] + ([count_col] if count_col else [])
         for chunk in pd.read_csv(path, usecols=usecols, dtype=str,
-                                 encoding=encoding, chunksize=chunk_size):
+                                 encoding=file_encoding, chunksize=chunk_size):
             funnel["rows_read"] += len(chunk)
             years = chunk[ycol].map(parse_year)
             states = chunk[scol].map(parse_state)
@@ -283,13 +313,17 @@ def read_numerator(paths, *, year_col="", state_col="", count_col="",
 # -----------------------------------------------------------------------------
 
 def read_denominator(acs_file="", acs_table=None, *, year_col="", state_col="",
-                     pop_col="", encoding="utf-8"):
+                     pop_col="", encoding=""):
     """返回 年份 × 州 人口 DataFrame；两种方式都没填返回 None。"""
     if acs_file and acs_file.strip():
         path = Path(acs_file.strip())
         if not path.is_file():
             fail(f"ACS_FILE 找不到：\n  {path}")
-        raw = pd.read_csv(path, dtype=str, encoding=encoding)
+        if path.suffix.lower() in (".xlsx", ".xlsm", ".xls"):
+            raw = pd.read_excel(path, dtype=str)
+        else:
+            raw = pd.read_csv(path, dtype=str,
+                              encoding=detect_encoding(path, encoding))
         ycol = year_col or find_col(raw.columns, ACS_YEAR_CANDIDATES)
         scol = state_col or find_col(raw.columns, ACS_STATE_CANDIDATES)
         pcol = pop_col or find_col(raw.columns, ACS_POP_CANDIDATES)
@@ -369,7 +403,7 @@ def run(nvdrs_files, output_dir, *, acs_file="", acs_table=None,
         year_col="", state_col="", count_col="",
         acs_year_col="", acs_state_col="", acs_pop_col="",
         base_year=BASE_YEAR, single_year=SINGLE_YEAR, years=tuple(YEARS),
-        scale=DENOMINATOR_SCALE, encoding="utf-8", chunk_size=200_000) -> dict:
+        scale=DENOMINATOR_SCALE, encoding="", chunk_size=200_000) -> dict:
     paths = [Path(f.strip()) for f in nvdrs_files if f and f.strip()]
     if not paths:
         fail("NVDRS 输入路径还没填。请在「配置区」填写 NVDRS_FILES，"

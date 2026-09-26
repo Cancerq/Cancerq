@@ -173,6 +173,34 @@ def main() -> int:
         check(math.isclose(result["table_b"].iloc[0]["rate_per_1000"], 10 / 13.006),
               "ACS_TABLE gives the same answer as ACS_FILE")
 
+        print("\n-- ACS file saved by Excel on Chinese Windows (GBK, Chinese header) --")
+        gbk = workdir / "acs_gbk.csv"
+        frame = pd.read_csv(acs, dtype=str)
+        frame.columns = ["年份", "州", "人口"]
+        frame["州"] = frame["州"].replace({"CO": "Colorado"})
+        frame.to_csv(gbk, index=False, encoding="gbk")
+        check(open(gbk, "rb").read(1) == "年".encode("gbk")[:1], "file really is GBK")
+        result, _ = quiet(rsr.run, [str(src)], str(workdir / "out_gbk"),
+                          acs_file=str(gbk))
+        check(math.isclose(result["table_b"].iloc[0]["rate_per_1000"], 10 / 13.006),
+              "GBK ACS file gives the same answer")
+
+        print("\n-- ACS as .xlsx --")
+        xlsx = workdir / "acs.xlsx"
+        pd.read_csv(acs, dtype=str).to_excel(xlsx, index=False)
+        result, _ = quiet(rsr.run, [str(src)], str(workdir / "out_xlsx"),
+                          acs_file=str(xlsx))
+        check(math.isclose(result["table_b"].iloc[0]["rate_per_1000"], 10 / 13.006),
+              "xlsx ACS file gives the same answer")
+
+        print("\n-- NVDRS numerator in GBK --")
+        src_gbk = workdir / "nvdrs_gbk.csv"
+        pd.read_csv(src, dtype=str).assign(备注="中文").to_csv(
+            src_gbk, index=False, encoding="gbk")
+        result, _ = quiet(rsr.run, [str(src_gbk)], str(workdir / "out_ngbk"),
+                          acs_file=str(acs))
+        check(result["table_b"].iloc[0]["nvdrs_deaths"] == 10, "GBK NVDRS file reads")
+
         print("\n-- CLI --")
         code, _ = quiet(rsr.main, ["--input", str(src), "--output-dir",
                                    str(workdir / "cli"), "--acs-file", str(acs)])

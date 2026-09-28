@@ -943,3 +943,19 @@ OUTPUT_DIR  = r"D:\...\Native_American"        # output_location
   `dist_state.csv` / `dist_age_group.csv`（category / n / percent，空白单列）、
   `distributions_all.csv`、`race_values.csv`（Race_c 全部取值及是否算进来）、
   `native_american_distributions.xlsx`。
+
+## Construction 预处理：`run_construction_index.py`
+
+输入已按年龄切好的 NVDRS CSV（18-27 / 28-37 / ...），按 `Census2018_Industry` **等于** `Construction`
+（或码 `0770`）筛出 construction case，分两步：
+
+1. **取 index**：只读行业列和 ID 列，写 `construction_index.csv`（`age_band` / `source_file` / `source_row_index` / ID）
+2. **按 index 取行并 concat**：回原文件取整行，写 `by_age/<文件名>_construction.csv`，并 concat 成 `NVDRS_construction_concat.csv`
+
+```python
+INPUT_DIR  = r"D:\...\age_chunks"          # 或逐个填 INPUT_FILES
+OUTPUT_DIR = r"D:\...\construction_out"
+```
+
+另有 `summary_by_age.csv`（每段读入数 / construction 数 / 行业为空数）和 `industry_values.csv`
+（行业列全部取值；含 "construct" 却没算进来的取值会在屏幕上提示）。

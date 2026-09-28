@@ -296,6 +296,37 @@ electrician_industry_values.csv   这些电工所在行业的原文 + 行数 + �
   non-construction 对比时，把行业未知的人塞进对照组会污染对照组。要合并改
   `UNKNOWN_INDUSTRY_GOES_TO = "nonconstruction"`。
 
+## Construction 预处理 + 按 index 取 NVDRS concat：`run_construction_concat.py`
+
+已经有 18-67 岁的年龄段文件（18-27 / 28-37 / 38-47 / 48-57 / 58-67），
+按 **`Census2018_Industry` 等于 "Construction"**（不区分大小写、忽略首尾空格）筛出
+construction case，再用这些 case 的 index 去 **NVDRS concat 总表**里把对应行取出来。
+
+```python
+AGE_CHUNK_DIR     = r"D:\NVDRS\age_chunks"        # 输入 1：年龄段文件目录（或填 AGE_CHUNK_FILES）
+NVDRS_CONCAT_FILE = r"D:\NVDRS\NVDRS_concat.csv"  # 输入 2：concat 总表
+OUTPUT_DIR        = r"D:\NVDRS\construction_out"  # 输出
+```
+
+```bash
+python run_construction_concat.py
+```
+
+index 默认用 **IncidentID + PersonID**（一个事件可能有多名死者，只用 IncidentID 会把
+同一事件里的非建筑业死者也带进来）；找不到就退到单列。列名不同时在 `KEY_COLS` 里写映射。
+`12345.0` 和 `12345` 当成同一个 ID。
+
+```
+OUTPUT_DIR/
+  NVDRS_concat_construction.csv   ★ 从 concat 取出的 construction 行（带 age_band）
+  construction_index.csv          construction case 的 index + age_band + 来源文件
+  construction_age_18_27.csv ...  每个年龄段的 construction 行
+  construction_all_ages.csv       5 个年龄段合并
+  index_not_found_in_concat.csv   concat 里找不到的 index（空 = 全部对上）
+  industry_values.csv             Census2018_Industry 各取值计数（核对用）
+  summary.csv                     各年龄段计数
+```
+
 ## 一键脚本（填空即用）：`run_construction_split.py`
 
 已经有年龄段 chunk 了，只想按 **`census2018_industry`** 分出 construction /
@@ -845,6 +876,7 @@ python tests/test_split_by_age.py
 python tests/test_filter_construction.py
 python tests/test_census_2018_only.py
 python tests/test_run_construction_split.py
+python tests/test_run_construction_concat.py
 python tests/test_run_electrician_split.py
 python tests/test_split_by_year.py
 python tests/test_run_electrician_by_year.py

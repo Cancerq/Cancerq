@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """从 NVDRS 数据里按 Race_c 筛出 American Indian / Alaska Native（Native American），
-并做 Gender / Education Level / State / Age Group 四个分布表。
+并做 Gender / Education Level / State / Age Group / Year 分布表。
+
+年份：只保留 IncidentYear 在 2018-2024 的行（YEAR_MIN / YEAR_MAX 可改）。
+      IncidentYear 为空或不在范围内的行不进入任何结果，行数记在 funnel.csv。
+      DeathYear / InjuryYear 这类列不会被拿来顶替 IncidentYear。
 
 判断：Race_c【包含】以下任一关键词（不区分大小写）就算：
           american indian / alaska native / native american
@@ -21,7 +25,9 @@
       dist_education.csv               Education Level 分布
       dist_state.csv                   State 分布
       dist_age_group.csv               Age Group 分布
-      distributions_all.csv            四个分布合成一张长表
+      dist_year.csv                    Year 分布（IncidentYear）
+      funnel.csv                       读入 -> 年份筛选 -> Native American 的行数交代
+      distributions_all.csv            各分布合成一张长表
       race_values.csv                  Race_c 的全部取值 / 计数 / 是否算进来（核对用）
       native_american_distributions.xlsx   以上各表放进一个 Excel（装了 openpyxl 才有）
 
@@ -66,6 +72,10 @@ OUTPUT_DIR = r""         # 例：r"D:\School_project\Project\NVDRS\Native_Americ
 # 以下通常不用改
 # -----------------------------------------------------------------------------
 
+# 年份界限（IncidentYear，闭区间，含两端）
+YEAR_MIN = 2018
+YEAR_MAX = 2024
+
 # Race_c 里【包含】其中任一关键词就算 Native American（不区分大小写）
 RACE_KEYWORDS = ["american indian", "alaska native", "native american"]
 
@@ -79,6 +89,7 @@ EDUCATION_COL = r""      # 自动找 EducationLevel / Education
 STATE_COL = r""          # 自动找 SiteState / State
 AGE_GROUP_COL = r""      # 自动找 AgeGroup / age_band；没有就用 Age 分段
 AGE_COL = r""            # 自动找 Age（数值年龄）
+YEAR_COL = r""           # 自动找 IncidentYear
 
 # 用数值 Age 分年龄组时的分段（闭区间）
 AGE_BANDS = [(18, 27), (28, 37), (38, 47), (48, 57), (58, 67)]
@@ -100,12 +111,16 @@ COL_CANDIDATES = {
     "age_group": ("agegroup", "ageband", "agerange", "agecategory", "agegrp",
                   "agecat"),
     "age": ("age", "ageyears", "victimage", "agec"),
+    "year": ("incidentyear", "incyear", "yearofincident"),
 }
+WRONG_YEAR_COLS = {"deathyear", "yearofdeath", "injuryyear", "yearofinjury",
+                   "birthyear", "filingyear", "reportyear"}
 DIMENSIONS = [
     ("gender", "Gender", "dist_gender.csv"),
     ("education", "Education Level", "dist_education.csv"),
     ("state", "State", "dist_state.csv"),
     ("age_group", "Age Group", "dist_age_group.csv"),
+    ("year", "Year", "dist_year.csv"),
 ]
 ENCODING_CANDIDATES = ("utf-8-sig", "gbk", "cp1252")
 SKIP_NAME_PATTERNS = (
@@ -189,6 +204,16 @@ def resolve_inputs(input_files, input_dir) -> list[Path]:
     return unique
 
 
+def parse_year(value):
+    """4 位年份，"2019.0" 也接受；也能从 "2019-05-13" 这类日期里取。读不出返回 None。"""
+    text = str(value).strip()
+    m = re.fullmatch(r"(\d{4})(?:\.0+)?", text)
+    if m:
+        return int(m.group(1))
+    years = re.findall(r"(?<!\d)((?:19|20)\d{2})(?!\d)", text)
+    return int(years[0]) if len(set(years)) == 1 else None
+
+
 def band_label(low: int, high: int) -> str:
     return f"{low}-{high}"
 
@@ -223,6 +248,12 @@ def resolve_columns(header, overrides: dict) -> dict:
     if not cols["race"]:
         fail("找不到 Race_c 列，请在配置区填 RACE_COL。\n"
              f"列有：{', '.join(map(str, header))}")
+    if not cols["year"]:
+        wrong = [c for c in header if norm_colname(c) in WRONG_YEAR_COLS]
+        fail("找不到 IncidentYear 列，没法按 2018-2024 筛年份。请在配置区填 YEAR_COL。"
+             + (f"\n注意：找到了 {', '.join(wrong)} —— 这些不是 incident year，不会拿来顶替。"
+                if wrong else "")
+             + f"\n列有：{', '.join(map(str, header))}")
     return cols
 
 
@@ -257,6 +288,7 @@ def distribution(values: pd.Series, label: str, order=None) -> pd.DataFrame:
 
 def run(input_files, input_dir, output_dir, *, race_col="", gender_col="",
         education_col="", state_col="", age_group_col="", age_col="",
+        year_col="", year_min=YEAR_MIN, year_max=YEAR_MAX,
         race_keywords=tuple(RACE_KEYWORDS), race_codes=tuple(RACE_CODES),
         age_bands=tuple(AGE_BANDS), encoding="", chunk_size=CHUNK_SIZE) -> dict:
     paths = resolve_inputs(input_files, input_dir)
@@ -266,9 +298,12 @@ def run(input_files, input_dir, output_dir, *, race_col="", gender_col="",
     out.mkdir(parents=True, exist_ok=True)
     if not any(k.strip() for k in race_keywords) and not race_codes:
         fail("RACE_KEYWORDS 和 RACE_CODES 都是空的")
+    if year_min > year_max:
+        fail(f"YEAR_MIN ({year_min}) 大于 YEAR_MAX ({year_max})")
 
     overrides = {"race": race_col, "gender": gender_col, "education": education_col,
-                 "state": state_col, "age_group": age_group_col, "age": age_col}
+                 "state": state_col, "age_group": age_group_col, "age": age_col,
+                 "year": year_col}
 
     # 第一遍只读表头，定下所有文件列的并集，输出文件才能用同一个表头
     headers = {}
@@ -281,6 +316,7 @@ def run(input_files, input_dir, output_dir, *, race_col="", gender_col="",
     race_counts: dict[str, int] = {}
     dims = {role: [] for role, _, _ in DIMENSIONS}
     age_source, rows_read, matched = {}, 0, 0
+    year_blank = year_outside = 0
 
     with open(cases_path, "w", newline="", encoding="utf-8-sig") as handle:
         out_cols = ["source_file", "age_group_used"] + union
@@ -299,11 +335,20 @@ def run(input_files, input_dir, output_dir, *, race_col="", gender_col="",
                 age_source[path.name] = "无（年龄组记为空白）"
             print(f"读取 {path.name}   编码={enc}  Race={cols['race']}  "
                   f"Gender={cols['gender']}  Education={cols['education']}  "
-                  f"State={cols['state']}  AgeGroup来源={age_source[path.name]}")
+                  f"State={cols['state']}  Year={cols['year']}  "
+                  f"AgeGroup来源={age_source[path.name]}")
 
             for chunk in pd.read_csv(path, dtype=str, keep_default_na=False,
                                      encoding=enc, chunksize=chunk_size):
                 rows_read += len(chunk)
+                years = chunk[cols["year"]].map(parse_year)
+                no_year = years.isna()
+                in_range = years.between(year_min, year_max)
+                year_blank += int(no_year.sum())
+                year_outside += int((~no_year & ~in_range).sum())
+                chunk, years = chunk[in_range], years[in_range]
+                if chunk.empty:
+                    continue
                 race = clean(chunk[cols["race"]])
                 for raw, n in race.value_counts().items():
                     race_counts[raw] = race_counts.get(raw, 0) + int(n)
@@ -322,6 +367,8 @@ def run(input_files, input_dir, output_dir, *, race_col="", gender_col="",
                 for role, _, _ in DIMENSIONS:
                     if role == "age_group":
                         dims[role].append(group)
+                    elif role == "year":
+                        dims[role].append(years[hit.index].astype(int).astype(str))
                     elif cols[role]:
                         dims[role].append(clean(hit[cols[role]]))
 
@@ -339,12 +386,23 @@ def run(input_files, input_dir, output_dir, *, race_col="", gender_col="",
             values = pd.Series([], dtype=object)
         else:
             values = pd.concat(dims[role], ignore_index=True)
-        table = distribution(values, label,
-                             order=band_order if role == "age_group" else None)
+        order = {"age_group": band_order,
+                 "year": [str(y) for y in range(year_min, year_max + 1)]}.get(role)
+        table = distribution(values, label, order=order)
         table.to_csv(out / filename, index=False, encoding="utf-8-sig")
         tables[role] = table
     long = pd.concat(tables.values(), ignore_index=True)
     long.to_csv(out / "distributions_all.csv", index=False, encoding="utf-8-sig")
+
+    in_years = rows_read - year_blank - year_outside
+    funnel = pd.DataFrame([
+        ("读入行数", rows_read),
+        ("IncidentYear 为空/读不出（剔除）", year_blank),
+        (f"IncidentYear 不在 {year_min}-{year_max}（剔除）", year_outside),
+        (f"{year_min}-{year_max} 的行数", in_years),
+        ("其中 Native American", matched),
+    ], columns=["step", "rows"])
+    funnel.to_csv(out / "funnel.csv", index=False, encoding="utf-8-sig")
 
     race_table = pd.DataFrame(sorted(race_counts.items(), key=lambda kv: -kv[1]),
                               columns=["Race_c", "n"])
@@ -359,11 +417,14 @@ def run(input_files, input_dir, output_dir, *, race_col="", gender_col="",
                 tables[role].to_excel(xl, sheet_name=label, index=False)
             long.to_excel(xl, sheet_name="All distributions", index=False)
             race_table.to_excel(xl, sheet_name="Race_c values", index=False)
+            funnel.to_excel(xl, sheet_name="funnel", index=False)
     except ImportError:
         print("（没装 openpyxl，跳过 Excel；CSV 已全部写好）")
 
-    print(f"\n读入 {rows_read} 行，其中 Native American {matched} 行"
-          + (f"（{matched / rows_read:.2%}）" if rows_read else ""))
+    print(f"\n读入 {rows_read} 行；IncidentYear 在 {year_min}-{year_max} 的 {in_years} 行"
+          f"（剔除 空白 {year_blank} / 范围外 {year_outside}）；"
+          f"其中 Native American {matched} 行"
+          + (f"（{matched / in_years:.2%}）" if in_years else ""))
     for role, label, _ in DIMENSIONS:
         print(f"\n{label} 分布")
         print(tables[role].drop(columns="dimension").to_string(index=False))
@@ -394,6 +455,9 @@ def main(argv=None) -> int:
     parser.add_argument("--input-dir", default=None)
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--race-col", default=None)
+    parser.add_argument("--year-col", default=None)
+    parser.add_argument("--year-min", type=int, default=None)
+    parser.add_argument("--year-max", type=int, default=None)
     parser.add_argument("--encoding", default=None)
     args = parser.parse_args(argv)
     run(
@@ -402,6 +466,9 @@ def main(argv=None) -> int:
         ("" if args.input is not None else INPUT_DIR),
         args.output_dir if args.output_dir is not None else OUTPUT_DIR,
         race_col=args.race_col or RACE_COL, gender_col=GENDER_COL,
+        year_col=args.year_col or YEAR_COL,
+        year_min=args.year_min if args.year_min is not None else YEAR_MIN,
+        year_max=args.year_max if args.year_max is not None else YEAR_MAX,
         education_col=EDUCATION_COL, state_col=STATE_COL,
         age_group_col=AGE_GROUP_COL, age_col=AGE_COL,
         race_keywords=RACE_KEYWORDS, race_codes=RACE_CODES, age_bands=AGE_BANDS,

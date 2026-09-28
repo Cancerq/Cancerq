@@ -7,6 +7,8 @@ What would quietly ruin the analysis:
   - the age group taken from the wrong place, or 27/28 landing in the wrong band
   - rows lost across chunk boundaries, so the tables don't add up
   - blanks silently dropped from a distribution instead of shown
+  - IncidentYear 2017 / 2025 let in, or 2018 / 2024 cut off
+  - DeathYear standing in for a missing IncidentYear
 
 Run with:  python tests/test_run_native_american.py
 """
@@ -68,9 +70,10 @@ ROWS = [
 ]
 
 
-def write_rows(path: Path, rows, encoding="utf-8", repeat=1) -> None:
+def write_rows(path: Path, rows, encoding="utf-8", repeat=1, year="2020") -> None:
     frame = pd.DataFrame([r[:5] for r in rows] * repeat,
                          columns=["Race_c", "Sex", "EducationLevel", "SiteState", "Age"])
+    frame["IncidentYear"] = year
     frame["IncidentID"] = [f"{i:06d}" for i in range(len(frame))]
     frame.to_csv(path, index=False, encoding=encoding)
 
@@ -129,7 +132,8 @@ def main() -> int:
         check(rv.loc["Two or more races", "counted_as_native_american"] == 0,
               "race_values flags multi-race as not counted")
         for name in ("dist_gender.csv", "dist_education.csv", "dist_state.csv",
-                     "dist_age_group.csv", "distributions_all.csv", "race_values.csv",
+                     "dist_age_group.csv", "dist_year.csv", "funnel.csv",
+                     "distributions_all.csv", "race_values.csv",
                      "native_american_distributions.xlsx"):
             check((out / name).is_file(), f"wrote {name}")
 
@@ -166,13 +170,43 @@ def main() -> int:
         check(result["matched"] == 5, "GBK file reads")
         check("Education Level" in log and "找不到" in log, "missing column reported")
 
+        print("\n-- IncidentYear limited to 2018-2024 --")
+        yr = workdir / "years.csv"
+        na = ("American Indian/Alaska Native", "Male", "", "AZ", "30")
+        years = ["2017", "2018", "2019.0", "2024", "2025", "", "2021-06-01", "abc"]
+        frame = pd.DataFrame([na] * len(years),
+                             columns=["Race_c", "Sex", "EducationLevel", "SiteState", "Age"])
+        frame["IncidentYear"] = years
+        frame["DeathYear"] = "2020"            # must not rescue the bad rows
+        frame.to_csv(yr, index=False)
+        result, _ = quiet(rna.run, [str(yr)], "", str(workdir / "out_yr"), chunk_size=3)
+        check(result["matched"] == 4, "2018 / 2019.0 / 2024 / 2021-06-01 kept")
+        y = result["tables"]["year"].set_index("category")["n"]
+        check(list(result["tables"]["year"]["category"]) ==
+              ["2018", "2019", "2021", "2024", "Total"], "year table in year order")
+        check("2017" not in y and "2025" not in y, "2017 and 2025 excluded")
+        funnel = pd.read_csv(workdir / "out_yr" / "funnel.csv").set_index("step")["rows"]
+        check(funnel.iloc[0] == 8, "funnel: 8 read")
+        check(funnel.iloc[1] == 2, "funnel: blank + unreadable = 2")
+        check(funnel.iloc[2] == 2, "funnel: outside range = 2")
+        check(funnel.iloc[3] == 4 and funnel.iloc[4] == 4, "funnel: 4 in range, 4 matched")
+        result, _ = quiet(rna.run, [str(yr)], "", str(workdir / "out_yr2"),
+                          year_min=2019, year_max=2021)
+        check(result["matched"] == 2, "YEAR_MIN / YEAR_MAX respected")
+
+        noyear = workdir / "noyear.csv"
+        frame.drop(columns="IncidentYear").to_csv(noyear, index=False)
+        msg = expect_exit(rna.run, [str(noyear)], "", str(workdir / "o"))
+        check("IncidentYear" in msg and "DeathYear" in msg,
+              "missing IncidentYear refused, DeathYear named but not used")
+
         print("\n-- errors --")
         check("input_location" in expect_exit(rna.run, [], "", str(workdir / "o")),
               "blank input explained")
         check("output_location" in expect_exit(rna.run, [str(src)], "", ""),
               "blank output explained")
         nocol = workdir / "norace.csv"
-        pd.DataFrame({"Sex": ["Male"]}).to_csv(nocol, index=False)
+        pd.DataFrame({"Sex": ["Male"], "IncidentYear": ["2020"]}).to_csv(nocol, index=False)
         check("Race_c" in expect_exit(rna.run, [str(nocol)], "", str(workdir / "o")),
               "missing Race_c explained")
 

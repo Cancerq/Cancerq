@@ -929,7 +929,8 @@ ACS_FILE    = r"D:\...\acs_pums_2018_2024_all_workers_nvdrs_rad_coverage_weighte
 
 ## Native American 分布：`run_native_american.py`
 
-按 `Race_c` 筛出 American Indian / Alaska Native，做 Gender / Education Level / State / Age Group 四个分布。
+按 `Race_c` 筛出 American Indian / Alaska Native，做 Gender / Education Level / State / Age Group / Year 分布。
+只保留 `IncidentYear` 在 **2018-2024** 的行（`YEAR_MIN` / `YEAR_MAX` 可改；不会拿 DeathYear 顶替），剔除的行数记在 `funnel.csv`。
 
 ```python
 INPUT_FILES = [ r"D:\...\NVDRS_18_67.csv" ]    # input_location（或填 INPUT_DIR 目录）

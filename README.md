@@ -926,3 +926,20 @@ ACS_FILE    = r"D:\...\acs_pums_2018_2024_all_workers_nvdrs_rad_coverage_weighte
 改某格覆盖权重（分母 = Full-state 人口 × 新权重）：
 `ACS_WEIGHT_OVERRIDES = {(2024, "FL"): 1.0}`。
 想要每 10 万人：`DENOMINATOR_SCALE = 100000`。
+
+## Native American 分布：`run_native_american.py`
+
+按 `Race_c` 筛出 American Indian / Alaska Native，做 Gender / Education Level / State / Age Group 四个分布。
+
+```python
+INPUT_FILES = [ r"D:\...\NVDRS_18_67.csv" ]    # input_location（或填 INPUT_DIR 目录）
+OUTPUT_DIR  = r"D:\...\Native_American"        # output_location
+```
+
+- 判断：`Race_c` **包含** `american indian` / `alaska native` / `native american`（不区分大小写）。
+  "Native Hawaiian"、"Two or more races" 不算；是数字代码就填 `RACE_CODES`。
+- 年龄组：优先用已有的年龄组列 → 否则按数值 `Age` 分 18-27 / 28-37 / 38-47 / 48-57 / 58-67 → 否则取文件名里的年龄段。
+- 输出：`native_american_cases.csv`（筛出的行）、`dist_gender.csv` / `dist_education.csv` /
+  `dist_state.csv` / `dist_age_group.csv`（category / n / percent，空白单列）、
+  `distributions_all.csv`、`race_values.csv`（Race_c 全部取值及是否算进来）、
+  `native_american_distributions.xlsx`。

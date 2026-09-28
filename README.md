@@ -296,15 +296,17 @@ electrician_industry_values.csv   这些电工所在行业的原文 + 行数 + �
   non-construction 对比时，把行业未知的人塞进对照组会污染对照组。要合并改
   `UNKNOWN_INDUSTRY_GOES_TO = "nonconstruction"`。
 
-## Construction 预处理 + 按 index 取 NVDRS concat：`run_construction_concat.py`
+## Construction 预处理 + 按 PersonID 合并 Narrative：`run_construction_concat.py`
 
-已经有 18-67 岁的年龄段文件（18-27 / 28-37 / 38-47 / 48-57 / 58-67），
-按 **`Census2018_Industry` 等于 "Construction"**（不区分大小写、忽略首尾空格）筛出
-construction case，再用这些 case 的 index 去 **NVDRS concat 总表**里把对应行取出来。
+已经有 18-67 岁的年龄段文件（18-27 / 28-37 / 38-47 / 48-57 / 58-67）：
+
+1. 按 **`Census2018_Industry` 等于 "Construction"**（不区分大小写、忽略首尾空格）筛出 construction case；
+2. 取这些 case 的 **PersonID**，去 **NVDRS concat** 里找对应的 **Narrative**；
+3. 按 PersonID 合并回来，**Narrative 列放在 IncidentID 后面**，5 个年龄段合成一张表（带 `age_band`）。
 
 ```python
 AGE_CHUNK_DIR     = r"D:\NVDRS\age_chunks"        # 输入 1：年龄段文件目录（或填 AGE_CHUNK_FILES）
-NVDRS_CONCAT_FILE = r"D:\NVDRS\NVDRS_concat.csv"  # 输入 2：concat 总表
+NVDRS_CONCAT_FILE = r"D:\NVDRS\NVDRS_concat.csv"  # 输入 2：含 PersonID + Narrative 的 concat
 OUTPUT_DIR        = r"D:\NVDRS\construction_out"  # 输出
 ```
 
@@ -312,19 +314,19 @@ OUTPUT_DIR        = r"D:\NVDRS\construction_out"  # 输出
 python run_construction_concat.py
 ```
 
-index 默认用 **IncidentID + PersonID**（一个事件可能有多名死者，只用 IncidentID 会把
-同一事件里的非建筑业死者也带进来）；找不到就退到单列。列名不同时在 `KEY_COLS` 里写映射。
-`12345.0` 和 `12345` 当成同一个 ID。
+concat 只读 PersonID 和 Narrative 两列，大文件也省内存。concat 里没有叫 `Narrative` 的列时，
+自动用所有名字含 narrative 的列（如 `NarrativeCME`、`NarrativeLE`），一起插在 IncidentID 后；
+也可在 `NARRATIVE_COLS` 里指定。`12345.0` 和 `12345` 当成同一个 PersonID。
 
 ```
 OUTPUT_DIR/
-  NVDRS_concat_construction.csv   ★ 从 concat 取出的 construction 行（带 age_band）
-  construction_index.csv          construction case 的 index + age_band + 来源文件
-  construction_age_18_27.csv ...  每个年龄段的 construction 行
-  construction_all_ages.csv       5 个年龄段合并
-  index_not_found_in_concat.csv   concat 里找不到的 index（空 = 全部对上）
-  industry_values.csv             Census2018_Industry 各取值计数（核对用）
-  summary.csv                     各年龄段计数
+  construction_all_ages_narrative.csv    ★ 全年龄段 construction + Narrative
+  construction_age_18_27_narrative.csv   每个年龄段各一份
+  construction_PersonID.csv              construction case 的 PersonID / IncidentID / age_band
+  PersonID_not_found_in_concat.csv       concat 里找不到的 PersonID（空 = 全部找到）
+  PersonID_multiple_narratives.csv       同一 PersonID 有多条不同 Narrative（取第一条非空）
+  industry_values.csv                    Census2018_Industry 各取值计数（核对用）
+  summary.csv                            各年龄段计数（含找到 Narrative 的行数）
 ```
 
 ## 一键脚本（填空即用）：`run_construction_split.py`

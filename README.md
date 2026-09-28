@@ -329,6 +329,28 @@ OUTPUT_DIR/
   summary.csv                            各年龄段计数（含找到 Narrative 的行数）
 ```
 
+## 分层随机抽样：`stratified_sample.py`
+
+对筛好的数据（默认是 `construction_all_ages_narrative.csv`）按 `age_band` 分层随机抽子集。
+
+```python
+INPUT_FILE  = r"D:\NVDRS\construction_out\construction_all_ages_narrative.csv"
+OUTPUT_DIR  = r"D:\NVDRS\construction_sample"
+STRATA_COLS = ["age_band"]          # 可多列组合，如 ["age_band", "Sex"]
+SAMPLING    = "proportional_n"      # proportional_n / proportional_frac / equal_n
+SAMPLE_N    = 500
+RANDOM_SEED = 2024                  # 固定种子，结果可复现
+```
+
+| 抽法 | 含义 |
+|---|---|
+| `proportional_n` | 总共抽 `SAMPLE_N` 行，按各层比例分配（最大余数法，合计正好 = N） |
+| `proportional_frac` | 每层抽 `SAMPLE_FRAC` 比例 |
+| `equal_n` | 每层抽 `SAMPLE_N_PER_STRATUM` 行，层不够就整层全取 |
+
+`REQUIRE_NONEMPTY_COLS = ["Narrative"]` 可在抽样前去掉 Narrative 为空的行。
+输出 `*_sample.csv`（带 `sample_weight` = 层总数 / 层抽中数）、`*_not_sampled.csv`、`sample_allocation.csv`。
+
 ## 一键脚本（填空即用）：`run_construction_split.py`
 
 已经有年龄段 chunk 了，只想按 **`census2018_industry`** 分出 construction /
@@ -879,6 +901,7 @@ python tests/test_filter_construction.py
 python tests/test_census_2018_only.py
 python tests/test_run_construction_split.py
 python tests/test_run_construction_concat.py
+python tests/test_stratified_sample.py
 python tests/test_run_electrician_split.py
 python tests/test_split_by_year.py
 python tests/test_run_electrician_by_year.py

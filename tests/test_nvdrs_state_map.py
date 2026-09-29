@@ -99,6 +99,29 @@ check({"CA", "TX", "FL", "NY", "PA", "IL"}.isdisjoint(panel.panel_usps),
 check(panel.fips_of["AL"] == 1 and panel.fips_of["WY"] == 56,
       "FIPS 对照读对了（AL=1, WY=56）")
 
+print("\n第三张图的范围（EXTRA_SCOPE）")
+covered, kind, rule = nsm.parse_scope("coverage:X,XP,0", panel)
+check(len(covered) == 41 and kind == "coverage",
+      f"2018 年 coverage_code 属于 X/XP/0 的正好 41 个辖区，得到 {len(covered)}")
+check("DC" in covered and len(covered - {"DC"}) == 40, "这 41 个 = 40 州 + DC")
+check(panel.panel_usps < covered, "36 个面板辖区全都在这 41 个里面（面板是它的子集）")
+check(covered - panel.panel_usps == {"CA", "HI", "IL", "NY", "PA"},
+      f"多出来的 5 个是 CA/HI/IL/NY/PA，得到 {sorted(covered - panel.panel_usps)}")
+check(set(panel.usps_order) - covered
+      == {"AR", "FL", "ID", "MS", "MT", "ND", "SD", "TN", "TX", "WY"},
+      "剩下 10 个 coverage_code=none 的州被排除在外")
+only_x, _, _ = nsm.parse_scope("coverage:X", panel)
+check(len(only_x) == 37, f"只要 X 的话是 37 个（36 面板 + NY），得到 {len(only_x)}")
+picked, kind, _ = nsm.parse_scope("states:al,ak , DC", panel)
+check(picked == {"AL", "AK", "DC"} and kind == "states",
+      "states: 名单不挑大小写和空格")
+check(nsm.parse_scope("", panel)[0] == set(), "留空就是不出第三张图")
+check("ZZ" in expect_exit(nsm.parse_scope, "states:AL,ZZ", panel),
+      "名单里有不认识的 USPS 码时报错并点名")
+bad_code = expect_exit(nsm.parse_scope, "coverage:QQ", panel)
+check("QQ" in bad_code and "XP" in bad_code,
+      "覆盖码一个都匹配不到时报错，并列出这一年实际有哪些码")
+
 print("\n地图边界文件")
 shapes = nsm.load_geometry(GEOJSON)
 check(set(shapes) == set(panel.usps_order),
@@ -226,6 +249,23 @@ with tempfile.TemporaryDirectory() as tmpdir:
     check(len(written) == 51 and int(written["TOTAL"].sum()) == 4,
           "落盘的计数表和内存里的一致")
 
+    print("\n第三张图的表和范围")
+    result = run_on(rows, tmp, map_style="none")
+    check(len(result["extra_table"]) == 41
+          and set(result["extra_table"]["usps"]) == covered,
+          "covered41 表 = 2018 有覆盖码的 41 个辖区")
+    check((result["output_dir"] / "covered41_state_year_counts.csv").is_file(),
+          "写出了 covered41_state_year_counts.csv")
+    check(int(result["extra_table"].loc[result["extra_table"]["usps"] == "TX", "TOTAL"].sum()
+              if "TX" in set(result["extra_table"]["usps"]) else 0) == 0,
+          "TX 不在这 41 个里（它 2018 的覆盖码是 none）")
+    same = run_on(rows, tmp, map_style="none")["table"]
+    check(bool((same["TOTAL"] == result["table"]["TOTAL"]).all()),
+          "换范围不改数字：每个州的 case 数三张图里完全一样，范围只决定画不画")
+    off = run_on(rows, tmp, map_style="none", extra_scope="")
+    check(off["extra_usps"] == set() and off["extra_table"].empty,
+          "extra_scope 留空 -> 没有第三个范围，也不出第三张表")
+
     print("\n画图")
     result = run_on(rows, tmp, map_style="both")
     figures = {p.name: p for p in result["figures"]}
@@ -233,7 +273,9 @@ with tempfile.TemporaryDirectory() as tmpdir:
         check(not figures, "没装 matplotlib 时只出表，不报错")
     else:
         for name in ("map_all_states_2018_2024.png", "map_panel36_2018_2024.png",
-                     "map_all_states_2018_2024_grid.png", "map_panel36_2018_2024_grid.png"):
+                     "map_covered41_2018_2024.png",
+                     "map_all_states_2018_2024_grid.png", "map_panel36_2018_2024_grid.png",
+                     "map_covered41_2018_2024_grid.png"):
             check(name in figures and figures[name].stat().st_size > 10_000,
                   f"{name} 画出来了")
         result = run_on(rows, tmp, map_style="geo", theme="both")

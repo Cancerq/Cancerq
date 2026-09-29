@@ -894,7 +894,9 @@ Unknown 被当成 FALSE），断言脚本恰好抓到这 3 行、行号正确、
 
 1. **2018-2024 年 NVDRS 的自杀 case 都来自哪些州**（表）
 2. **全部 50 州 + DC 的分布图**，没有数据的州画灰色
-3. **2018 年 NVDRS 已覆盖的 35 州 + DC 的分布图**，没有数据的州同样画灰色
+3. **2018 年 NVDRS 已覆盖的 35 州 + DC 的分布图**（`in_panel=1`），没有数据的州同样画灰色
+4. **第三张范围图**：默认按 2018 年 `coverage_code ∈ {X, XP, 0}` 取，正好 41 个辖区
+   （40 州 + DC），也就是把部分覆盖的 CA / IL / PA 和 HI / NY 一并算进来的那个口径
 
 ```bash
 pip install pandas matplotlib
@@ -933,12 +935,36 @@ OUTPUT_DIR/
   states_with_cases.csv            有 case 的州，按总数排序  ← 问题 1 的答案
   states_without_cases.csv         没有 case 的州（图上灰色的那些）
   panel36_state_year_counts.csv    只含 2018 面板的 36 个辖区
+  covered41_state_year_counts.csv  只含 2018 有覆盖码的 41 个辖区
   state_source_counts.csv          每行的州是从 InjuryState 还是 SiteID 认出来的
   unresolved_state_values.csv      认不出来的州取值，逐个列出
   funnel.csv                       读入 -> 计入 的逐级交代
   map_all_states_2018_2024.png     图 2：全部 50 州 + DC
   map_panel36_2018_2024.png        图 3：2018 面板 35 州 + DC
+  map_covered41_2018_2024.png      图 4：2018 有覆盖码的 40 州 + DC
 ```
+
+### 第三张图的范围怎么换
+
+`EXTRA_SCOPE`（或 `--extra-scope`）决定第四份产出画哪些辖区，**只影响画不画，不改数字**
+——同一个州在三张图里的 case 数完全一样。
+
+```bash
+# 默认：2018 年 coverage_code 是 X（全覆盖）/ XP（部分覆盖）/ 0 的辖区 -> 41 个
+python nvdrs_state_map.py --extra-scope "coverage:X,XP,0"
+
+# 只要全覆盖（X）-> 37 个（36 个面板辖区 + NY）
+python nvdrs_state_map.py --extra-scope "coverage:X"
+
+# 自己给名单（USPS，逗号分隔），标题里的称呼用 --extra-scope-label 指定
+python nvdrs_state_map.py --extra-scope "states:AL,AK,AZ,CA,CO" --extra-scope-label "2018 RAD states"
+
+# 不要第三张图
+python nvdrs_state_map.py --extra-scope ""
+```
+
+各口径下辖区数（按现在这份面板文件）：`X` 37 个、`X,XP` 40 个、`X,XP,0` 41 个，
+`in_panel=1` 36 个。名单里写了面板文件不认识的 USPS 码会直接报错并点名。
 
 跑完屏幕上会打出州名单、逐级筛选，以及两个值得回头看一眼的提示：**有 case 但
 `in_panel=0` 的州**（多半是后来才加入、或只覆盖部分县），和**在面板里却一个 case

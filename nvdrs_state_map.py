@@ -111,6 +111,17 @@ THEME = "light"
 #   "auto" = 有中文字体就按 "zh" 来，没有就退回英文（不会画出方块豆腐）
 FIGURE_LANG = "en"
 
+# 第三张图的范围。除了「全部 51」和「in_panel=1 的 36」，再按下面的规则出一张。
+#   "coverage:X,XP,0"  = PANEL_YEAR 那一年 coverage_code 属于这几个码的辖区。
+#                        用现在这份面板文件跑出来正好是 41 个（40 州 + DC），
+#                        也就是 2018 年 NVDRS「有覆盖」（含部分覆盖）的那一批。
+#   "states:AL,AK,..." = 自己给一份 USPS 名单（逗号分隔），按它画
+#   ""                 = 不出第三张图
+EXTRA_SCOPE = "coverage:X,XP,0"
+
+# 第三张图标题里怎么称呼这个范围。留空 = 自动生成（"2018 coverage" / "selected"）
+EXTRA_SCOPE_LABEL = ""
+
 # 图上每个州标 USPS 缩写 + case 数（关掉就只标缩写）
 ANNOTATE_COUNTS = True
 
@@ -253,10 +264,18 @@ FIGURE_TEXT = {
         "title_panel": "NVDRS 自杀 case 的州分布 · {panel_year} 面板（{years}）",
         "subtitle_panel": ("只看 {panel_year} 年 NVDRS 已覆盖的 {n} 个辖区（{composition}）；"
                            "灰色 = 没有 case 或不在面板"),
-        # 图例固定用英文（中文标题 + 英文图例），改回中文就把这三行换成中文
+        "title_extra": "NVDRS 自杀 case 的州分布 · {label}（{years}）",
+        "subtitle_extra": ("只看这 {n} 个辖区（{composition}）：{rule}；"
+                           "灰色 = 没有 case 或不在这个范围"),
+        "rule_coverage": "{panel_year} 年覆盖码为 {codes}",
+        "rule_states": "自定名单",
+        "label_coverage": "{panel_year} coverage",
+        "label_states": "selected",
+        # 图例固定用英文（中文标题 + 英文图例），改回中文就把这四行换成中文
         "legend_title": "Suicide cases ({years})",
         "no_data": "No data (0 cases)",
         "out_of_scope": "Outside the {panel_year} panel",
+        "out_of_scope_extra": "Outside this set",
         "footnote": ("数据：NVDRS 自杀 case，{years}；州 = InjuryState（空白时用 SiteID）。"
                      "州名单与 {panel_year} 面板口径来自 {panel_file}。合计 {total} 例。"),
         "states": "州",
@@ -269,9 +288,17 @@ FIGURE_TEXT = {
         "title_panel": "NVDRS suicide cases by state · {panel_year} panel ({years})",
         "subtitle_panel": ("Only the {n} jurisdictions NVDRS covered in {panel_year} "
                            "({composition}); grey = no cases or outside the panel"),
+        "title_extra": "NVDRS suicide cases by state · {label} ({years})",
+        "subtitle_extra": ("Only these {n} jurisdictions ({composition}): {rule}; "
+                           "grey = no cases or outside this set"),
+        "rule_coverage": "{panel_year} coverage code {codes}",
+        "rule_states": "a supplied list",
+        "label_coverage": "{panel_year} coverage",
+        "label_states": "selected",
         "legend_title": "Suicide cases ({years})",
         "no_data": "No data (0 cases)",
         "out_of_scope": "Outside the {panel_year} panel",
+        "out_of_scope_extra": "Outside this set",
         "footnote": ("NVDRS suicide cases, {years}; state = InjuryState (SiteID when blank). "
                      "Jurisdiction list and {panel_year} panel from {panel_file}. "
                      "{total} cases in total."),
@@ -457,6 +484,12 @@ class Panel:
             fail(f"面板文件里没有 year={panel_year} 的行，无法确定 2018 面板是哪些州。")
         self.panel_usps: set[str] = set(year_rows.loc[year_rows["in_panel"] == 1, "usps"])
 
+        # PANEL_YEAR 那一年每个辖区的覆盖码，供 EXTRA_SCOPE="coverage:..." 用
+        self.coverage_of: dict[str, str] = (
+            dict(zip(year_rows["usps"], year_rows["coverage_code"].astype(str).str.strip()))
+            if "coverage_code" in year_rows.columns else {}
+        )
+
     def __len__(self) -> int:
         return len(self.usps_order)
 
@@ -485,6 +518,46 @@ def load_panel(path: str, panel_year: int = PANEL_YEAR) -> Panel:
         print(f"  注意：这些辖区的 in_panel 在各年之间不一致：{moving}\n"
               f"        面板成员按 year={panel_year} 那一年取。")
     return Panel(frame, panel_year)
+
+
+def parse_scope(spec: str, panel: Panel) -> tuple[set[str], str, str]:
+    """解析 EXTRA_SCOPE，返回 (USPS 集合, 种类, 说明)。
+
+    "coverage:X,XP,0"  -> PANEL_YEAR 那年覆盖码在这几个码里的辖区
+    "states:AL,AK,..." -> 自己给的名单
+    """
+    spec = (spec or "").strip()
+    if not spec:
+        return set(), "", ""
+
+    kind, _, rest = spec.partition(":")
+    kind = kind.strip().lower()
+    items = [p.strip() for p in rest.split(",") if p.strip()]
+    if not items:
+        fail(f"EXTRA_SCOPE 写了 {spec!r}，但冒号后面没有内容。\n"
+             "写法：\"coverage:X,XP,0\" 或 \"states:AL,AK,AZ\"，不要就留空。")
+
+    if kind == "coverage":
+        if not panel.coverage_of:
+            fail("EXTRA_SCOPE 用了 coverage:，但面板文件里没有 coverage_code 列。\n"
+                 "改用 \"states:AL,AK,...\" 直接给名单，或把这一项留空。")
+        wanted = {c.lower() for c in items}
+        chosen = {u for u, code in panel.coverage_of.items() if code.lower() in wanted}
+        if not chosen:
+            seen = sorted(set(panel.coverage_of.values()))
+            fail(f"EXTRA_SCOPE 要的覆盖码 {', '.join(items)} 在 {panel.panel_year} 年一个辖区都没匹配到。\n"
+                 f"这一年实际出现的覆盖码：{', '.join(seen)}")
+        return chosen, "coverage", "/".join(items)
+
+    if kind == "states":
+        chosen = {s.upper() for s in items}
+        unknown = sorted(chosen - set(panel.usps_order))
+        if unknown:
+            fail(f"EXTRA_SCOPE 的名单里有面板文件不认识的 USPS 码：{', '.join(unknown)}\n"
+                 f"面板文件里的辖区：{', '.join(panel.usps_order)}")
+        return chosen, "states", ""
+
+    fail(f"EXTRA_SCOPE 只认 \"coverage:...\" 和 \"states:...\"，收到 {spec!r}。")
 
 
 class StateResolver:
@@ -1135,6 +1208,8 @@ def run(
     map_style: str = MAP_STYLE,
     theme: str = THEME,
     figure_lang: str = FIGURE_LANG,
+    extra_scope: str = EXTRA_SCOPE,
+    extra_scope_label: str = EXTRA_SCOPE_LABEL,
     annotate_counts: bool = ANNOTATE_COUNTS,
     n_bins: int = N_BINS,
     dpi: int = DPI,
@@ -1170,6 +1245,13 @@ def run(
                    if "DC" in panel.panel_usps else f"{len(panel.panel_usps)} 州")
     print(f"  辖区总数 {len(panel)} 个；{panel_year} 年面板（in_panel=1）"
           f"{len(panel.panel_usps)} 个（{composition}）")
+    extra_usps, extra_kind, extra_rule = parse_scope(extra_scope, panel)
+    if extra_usps:
+        extra_comp = (f"{len(extra_usps) - 1} 州 + DC" if "DC" in extra_usps
+                      else f"{len(extra_usps)} 州")
+        how = (f"{panel_year} 年 coverage_code ∈ {{{extra_rule}}}"
+               if extra_kind == "coverage" else "自定名单")
+        print(f"  第三张图的范围：{how} -> {len(extra_usps)} 个（{extra_comp}）")
     print(f"年份：{wanted[0]}-{wanted[-1]}  {wanted}")
     print(f"州的判断：{state_source}（InjuryState 为主，空白退回 SiteID）")
     print("=" * 78)
@@ -1194,6 +1276,12 @@ def run(
     with_cases.to_csv(out_dir / "states_with_cases.csv", index=False, encoding="utf-8-sig")
     without_cases.to_csv(out_dir / "states_without_cases.csv", index=False, encoding="utf-8-sig")
     panel_table.to_csv(out_dir / panel_table_name, index=False, encoding="utf-8-sig")
+
+    extra_stem = ("covered" if extra_kind == "coverage" else "scope") + str(len(extra_usps))
+    extra_table = table[table["usps"].isin(extra_usps)].reset_index(drop=True)
+    extra_table_name = f"{extra_stem}_state_year_counts.csv" if extra_usps else ""
+    if extra_usps:
+        extra_table.to_csv(out_dir / extra_table_name, index=False, encoding="utf-8-sig")
 
     pd.DataFrame(
         [{"resolved_from": k, "rows": v} for k, v in result["source_counts"].most_common()],
@@ -1292,27 +1380,45 @@ def run(
         years=years_label, panel_year=panel_year,
         panel_file=Path(panel_csv).name, total=f"{total:,}",
     )
-    legend_labels = {
-        "title": text["legend_title"].format(years=years_label),
-        "no_data": text["no_data"],
-        "out_of_scope": text["out_of_scope"].format(panel_year=panel_year),
-    }
+    def legend_for(out_of_scope: str) -> dict[str, str]:
+        return {
+            "title": text["legend_title"].format(years=years_label),
+            "no_data": text["no_data"],
+            "out_of_scope": out_of_scope,
+        }
 
     scopes = [
         (None, "map_all_states",
          text["title_all"].format(years=years_label),
          text["subtitle_all"].format(
-             n=len(panel), composition=composed(len(panel), "DC" in panel.name_of))),
+             n=len(panel), composition=composed(len(panel), "DC" in panel.name_of)),
+         legend_for("")),
         (panel.panel_usps, f"map_panel{len(panel.panel_usps)}",
          text["title_panel"].format(years=years_label, panel_year=panel_year),
          text["subtitle_panel"].format(
              n=len(panel.panel_usps), panel_year=panel_year,
-             composition=composed(len(panel.panel_usps), "DC" in panel.panel_usps))),
+             composition=composed(len(panel.panel_usps), "DC" in panel.panel_usps)),
+         legend_for(text["out_of_scope"].format(panel_year=panel_year))),
     ]
+
+    if extra_usps:
+        label = extra_scope_label.strip() or text[
+            "label_coverage" if extra_kind == "coverage" else "label_states"
+        ].format(panel_year=panel_year)
+        rule = (text["rule_coverage"].format(panel_year=panel_year, codes=extra_rule)
+                if extra_kind == "coverage" else text["rule_states"])
+        scopes.append((
+            extra_usps, f"map_{extra_stem}",
+            text["title_extra"].format(years=years_label, label=label),
+            text["subtitle_extra"].format(
+                n=len(extra_usps), rule=rule,
+                composition=composed(len(extra_usps), "DC" in extra_usps)),
+            legend_for(text["out_of_scope_extra"]),
+        ))
 
     for theme_name in themes:
         suffix = "" if theme_name == "light" else "_dark"
-        for scope, stem, title, subtitle in scopes:
+        for scope, stem, title, subtitle, legend_labels in scopes:
             for style in styles:
                 tag = "" if style == "geo" else "_grid"
                 path = out_dir / f"{stem}_{wanted[0]}_{wanted[-1]}{tag}{suffix}.png"
@@ -1336,9 +1442,10 @@ def run(
     print("输出")
     print("=" * 78)
     for name in ("state_year_counts.csv", "states_with_cases.csv",
-                 "states_without_cases.csv", panel_table_name,
+                 "states_without_cases.csv", panel_table_name, extra_table_name,
                  "state_source_counts.csv", "unresolved_state_values.csv", "funnel.csv"):
-        print(f"  {out_dir / name}")
+        if name:
+            print(f"  {out_dir / name}")
     for path in figures:
         print(f"  {path}")
     if bins:
@@ -1350,6 +1457,8 @@ def run(
         "with_cases": with_cases,
         "without_cases": without_cases,
         "panel_table": panel_table,
+        "extra_table": extra_table,
+        "extra_usps": extra_usps,
         "counts": counts,
         "bins": bins,
         "figures": figures,
@@ -1385,6 +1494,11 @@ def main(argv=None) -> int:
     parser.add_argument("--theme", choices=["light", "dark", "both"], default=None)
     parser.add_argument("--figure-lang", choices=["auto", "zh", "en"], default=None,
                         help="图上文字的语言（auto = 有中文字体就用中文）")
+    parser.add_argument("--extra-scope", default=None,
+                        help="第三张图的范围：\"coverage:X,XP,0\" 或 \"states:AL,AK,...\"，"
+                             "留空字符串则不出")
+    parser.add_argument("--extra-scope-label", default=None,
+                        help="第三张图标题里对这个范围的称呼")
     parser.add_argument("--no-counts", action="store_true", help="图上只标州缩写，不标数字")
     parser.add_argument("--bins", type=int, default=None)
     parser.add_argument("--dpi", type=int, default=None)
@@ -1410,6 +1524,8 @@ def main(argv=None) -> int:
         map_style=pick(args.map_style, MAP_STYLE),
         theme=pick(args.theme, THEME),
         figure_lang=pick(args.figure_lang, FIGURE_LANG),
+        extra_scope=pick(args.extra_scope, EXTRA_SCOPE),
+        extra_scope_label=pick(args.extra_scope_label, EXTRA_SCOPE_LABEL),
         annotate_counts=(not args.no_counts) if args.no_counts else ANNOTATE_COUNTS,
         n_bins=pick(args.bins, N_BINS),
         dpi=pick(args.dpi, DPI),

@@ -881,3 +881,36 @@ Unknown 被当成 FALSE），断言脚本恰好抓到这 3 行、行号正确、
 
 本仓库不包含任何 NVDRS 数据。NVDRS 是限制性使用数据，请不要把数据文件提交进来
 （`.gitignore` 已排除 `*.csv` 与常见数据目录）。
+
+## CSV / Excel 转 LLM 预训练 JSON：`to_pretrain_json.py`
+
+把表格每一行变成一条 `{"text": "..."}`，默认输出 JSONL（一行一条），
+Hugging Face `datasets`、LLaMA-Factory、Megatron 等可直接读。
+
+```bash
+pip install pandas openpyxl        # 读 .xls 还要 xlrd
+
+# 默认：每个非空列写成 "列名: 值"，一列一行
+python to_pretrain_json.py --input data.xlsx --output pretrain.jsonl
+
+# 只用叙述列当正文，去重，丢掉少于 20 字的
+python to_pretrain_json.py --input csv_dir/ --output pretrain.jsonl \
+    --text-cols NarrativeLE,NarrativeCME --dedupe --min-chars 20
+
+# 自定义模板 + 附加字段 + 来源行号
+python to_pretrain_json.py --input a.csv --output pretrain.jsonl \
+    --template "{Age}岁{Sex}，职业：{Occupation}。经过：{Narrative}" \
+    --meta-cols CaseID --add-source
+```
+
+输出示例：
+
+```json
+{"text": "34岁Male，职业：Electrician。经过：在工地触电。", "CaseID": "007", "source": "a.csv", "row": 1}
+```
+
+- 输入可以是文件、多个文件或目录；Excel 的每个工作表都会读（`--sheets` 可限定）
+- 输出后缀是 `.json` 时写成一个 JSON 数组，否则 JSONL
+- 空单元格不会变成 `nan`；`34.0` 写成 `34`；ID 前导 0 保留；中文不转义
+- CSV 编码自动识别（UTF-8 / GBK），大文件分块读
+- 也可以不用命令行：填好脚本顶部「配置区」后直接 `python to_pretrain_json.py`

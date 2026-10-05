@@ -64,7 +64,7 @@ INPUT_PATHS = [
 ]
 
 # 【必填 2】输出文件
-OUTPUT_PATH = r""        # 例：r"D:\data\pretrain.jsonl"
+OUTPUT_PATH = r""        # 例：r"D:\data\pretrain.jsonl"，填文件夹也行（自动起文件名）
 
 # -----------------------------------------------------------------------------
 # text 怎么拼（三选一，都不填 = 每列写成 "列名: 值"）
@@ -296,9 +296,29 @@ def iter_records(files: list[Path], formatter: RowFormatter, meta_cols: list[str
             row_no[source] = start + len(df)
 
 
-def write_records(records: Iterable[dict], output: Path, fmt: str) -> None:
+def resolve_output(output: Path, files: list[Path], fmt: str | None) -> tuple[Path, str]:
+    """OUTPUT 是文件夹（已存在或没有后缀）时，在里面自动起文件名：
+    单个输入用输入文件名（cases.xlsx -> cases.jsonl），多个输入用 pretrain。"""
+    is_dir = output.is_dir() or not output.suffix
+    if fmt is None:
+        fmt = "json" if not is_dir and output.suffix.lower() == ".json" else OUTPUT_FORMAT
+    if is_dir:
+        stem = files[0].stem if len(files) == 1 else "pretrain"
+        output = output / f"{stem}.{fmt}"
+    return output, fmt
+
+
+def open_output(output: Path):
     output.parent.mkdir(parents=True, exist_ok=True)
-    with open(output, "w", encoding="utf-8", newline="\n") as fh:
+    try:
+        return open(output, "w", encoding="utf-8", newline="\n")
+    except PermissionError:
+        sys.exit(f"没有权限写入：{output}\n"
+                 "请检查：这个文件是否正被其他程序打开；路径是否指向只读位置。")
+
+
+def write_records(records: Iterable[dict], output: Path, fmt: str) -> None:
+    with open_output(output) as fh:
         if fmt == "jsonl":
             for rec in records:
                 fh.write(json.dumps(rec, ensure_ascii=False))
@@ -351,9 +371,6 @@ def main(argv: list[str] | None = None) -> dict:
         sys.exit("请填写 OUTPUT_PATH 或传 --output")
     output = Path(output_raw.strip()).expanduser()
 
-    fmt = pick(args.format, None)
-    if fmt is None:
-        fmt = "json" if output.suffix.lower() == ".json" else OUTPUT_FORMAT
     joiner = JOINER if args.joiner is None else \
         args.joiner.replace("\\n", "\n").replace("\\t", "\t")
 
@@ -371,6 +388,7 @@ def main(argv: list[str] | None = None) -> dict:
         sys.exit(f"META_COLS 里不能有正文字段名 {text_field!r}")
 
     files = collect_inputs(inputs)
+    output, fmt = resolve_output(output, files, args.format)
     stats = {"rows": 0, "written": 0, "short": 0, "duplicate": 0}
     records = iter_records(
         files, formatter, meta_cols,

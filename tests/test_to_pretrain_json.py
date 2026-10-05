@@ -139,6 +139,18 @@ def main() -> int:
         run(["--input", str(xdir), "--output", str(out), "--sheets", "B"])
         check(len(read_jsonl(out)) == 1, "--sheets limits to one sheet")
 
+        print("output is a folder")
+        odir = tmp / "Construction_case_&_Narrative" / "Json_all_and_sampling"
+        odir.mkdir(parents=True)
+        run(["--input", str(csv_path), "--output", str(odir)])
+        check(len(read_jsonl(odir / "cases.jsonl")) == 3,
+              "existing folder -> <input name>.jsonl inside it")
+        newdir = tmp / "new_out"
+        run(["--input", str(csv_path), str(xdir), "--output", str(newdir),
+             "--format", "json"])
+        check((newdir / "pretrain.json").is_file(),
+              "missing suffix-less path created as folder, multi-input -> pretrain.json")
+
         print("errors")
         msg = expect_exit(["--input", str(csv_path), "--output", str(tmp / "x.jsonl"),
                            "--template", "{Missing}"])

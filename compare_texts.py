@@ -101,7 +101,9 @@ class Comparison(BaseModel):
 SYSTEM = (
     "You are a literary analyst. Base every claim on the text you are given, "
     "and be specific: name the device and point to where it appears. "
-    "Write in the same language as the user's request."
+    "The texts may be fiction or first-person essays; in an essay, treat the narrator "
+    "and the people they describe as the characters. "
+    "Write your answer in the language the texts are written in."
 )
 
 ANALYZE_PROMPT = """Analyse the text below on three dimensions:
@@ -333,6 +335,10 @@ def main(argv: list[str] | None = None) -> int:
         sys.exit("Could not reach the API; check the network connection.")
     except RuntimeError as e:
         sys.exit(str(e))
+    except TypeError as e:
+        if "authentication" not in str(e):
+            raise
+        sys.exit("No API credentials: set ANTHROPIC_API_KEY or run `ant auth login`.")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(render(analyses, comparison), encoding="utf-8")

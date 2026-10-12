@@ -4,7 +4,8 @@
 What would quietly ruin the narrative set:
   - a decedent's LE paired with another decedent's CME
   - narrative text altered (whitespace collapsed, quotes mangled by encoding)
-  - two victims of one incident collapsed into one case_id
+  - the IncidentID filter matching on anything but IncidentID
+  - a sample that is not reproducible, repeats cases, or leaks unfiltered ones
   - rows vanishing without being counted
 
 Run with:  python tests/test_narratives_to_json.py
@@ -71,56 +72,103 @@ def main() -> int:
         src = tmp / "narratives.txt"
         src.write_bytes(TAB_FILE.encode("utf-8"))
 
-        print("tab-delimited, IncidentID + PersonID")
+        print("tab-delimited, case_id = IncidentID")
         out_dir = tmp / "Construction_case_&_Narrative" / "Json"
         out_dir.mkdir(parents=True)
-        log = run(["--input", str(src), "--output", str(out_dir)])
+        log = run(["--input", str(src), "--output", str(out_dir), "--sample", "0"])
         recs = load(out_dir / "narratives.json")
-        check([r["case_id"] for r in recs] == ["1001_1", "1001_2", "1003_1"],
-              "two victims of one incident stay separate; blank rows dropped")
+        check([r["case_id"] for r in recs] == ["1001", "1003"],
+              "one record per IncidentID; blank rows dropped")
         check(list(recs[0]) == ["case_id", "LE", "CME"], "exact key order")
-        check(recs[0] == {"case_id": "1001_1", "LE": "V was found  at the site.",
+        check(recs[0] == {"case_id": "1001", "LE": "V was found  at the site.",
                           "CME": "CME: electrocution."}, "text kept verbatim, first copy kept")
-        check(recs[1]["CME"] == "", "missing CME is empty string, row kept")
-        check(recs[2]["LE"] == "Line one\nLine two", "multi-line narrative, CRLF normalised")
-        check(recs[2]["CME"] == "Decedent's \"note\".", "quotes intact")
-        check("case_id = IncidentID + PersonID" in log, "chosen columns printed")
-        check("编号为空     1" in log and "都为空  1" in log and "重复 case_id 1" in log,
+        check(recs[1]["LE"] == "Line one\nLine two", "multi-line narrative, CRLF normalised")
+        check(recs[1]["CME"] == "Decedent's \"note\".", "quotes intact")
+        check("case_id = IncidentID " in log, "chosen columns printed")
+        check("编号为空     1" in log and "都为空  1" in log and "重复 case_id 2" in log,
               "every dropped row counted")
         dup = (out_dir / "duplicate_case_ids.csv").read_text(encoding="utf-8")
-        check("1001_1,narratives.txt,6" in dup, "duplicate written with file and row")
+        check("1001,narratives.txt,2" in dup and "1001,narratives.txt,6" in dup,
+              "duplicates written with file and row")
+        check(not list(out_dir.glob("*sample*")), "--sample 0 writes no sample file")
+
+        print("--id-cols still allows IncidentID + PersonID")
+        out = tmp / "pair.json"
+        run(["--input", str(src), "--output", str(out), "--id-cols", "IncidentID,PersonID",
+             "--sample", "0"])
+        check([r["case_id"] for r in load(out)] == ["1001_1", "1001_2", "1003_1"],
+              "override joins columns")
 
         print("require both")
         out = tmp / "both.json"
-        run(["--input", str(src), "--output", str(out), "--require-both"])
-        check([r["case_id"] for r in load(out)] == ["1001_1", "1003_1"],
-              "row without CME dropped")
+        run(["--input", str(src), "--output", str(out), "--require-both", "--sample", "0"])
+        check([r["case_id"] for r in load(out)] == ["1001", "1003"], "row without CME dropped")
 
-        print("pipe-delimited cp1252, single CaseID column, custom names")
+        print("pipe-delimited cp1252, column aliases")
         pipe = tmp / "pipe" / "n.txt"
         pipe.parent.mkdir()
-        pipe.write_bytes("CaseID|LE_Narrative|CME_Narrative\n"
-                         "007|V’s truck|Café owner\n".encode("cp1252"))
+        pipe.write_bytes("Incident_ID|LE_Narrative|CME_Narrative\n"
+                         "007|V\u2019s truck|Caf\u00e9 owner\n".encode("cp1252"))
         out = tmp / "pipe.json"
-        run(["--input", str(pipe.parent), "--output", str(out)])
-        check(load(out) == [{"case_id": "007", "LE": "V’s truck", "CME": "Café owner"}],
+        run(["--input", str(pipe.parent), "--output", str(out), "--sample", "0"])
+        check(load(out) == [{"case_id": "007", "LE": "V\u2019s truck", "CME": "Caf\u00e9 owner"}],
               "cp1252 decoded, leading zero kept, column aliases found")
 
-        print("keep-ids filter")
+        print("keep-ids filter matches on IncidentID only")
         keep = tmp / "construction_cases.csv"
-        keep.write_text("IncidentID,PersonID,Age\n1001,2,40\n1003,1.0,50\n9999,1,60\n",
-                        encoding="utf-8")
+        keep.write_text("IncidentID,PersonID,Age\n1003.0,9,50\n9999,1,60\n", encoding="utf-8")
         out = tmp / "keep.json"
-        log = run(["--input", str(src), "--output", str(out), "--keep-ids", str(keep)])
-        check([r["case_id"] for r in load(out)] == ["1001_2", "1003_1"],
-              "only ids in the keep file; 1.0 matches 1")
-        check("1 个 case_id 在叙述文件里没找到" in log, "missing keep ids reported")
+        log = run(["--input", str(src), "--output", str(out), "--keep-ids", str(keep),
+                   "--sample", "0"])
+        check([r["case_id"] for r in load(out)] == ["1003"],
+              "PersonID in keep file ignored; 1003.0 matches 1003")
+        check("1 个 IncidentID 在叙述文件里没找到" in log, "missing keep ids reported")
+        out = tmp / "keep_pair.json"
+        run(["--input", str(src), "--output", str(out), "--keep-ids", str(keep),
+             "--id-cols", "IncidentID,PersonID", "--sample", "0"])
+        check([r["case_id"] for r in load(out)] == ["1003_1"],
+              "filter stays on IncidentID even when case_id has PersonID")
+        no_inc = tmp / "no_inc.csv"
+        no_inc.write_text("CaseID\n1\n", encoding="utf-8")
+        msg = expect_exit(["--input", str(src), "--output", str(out), "--keep-ids", str(no_inc)])
+        check("找不到 IncidentID 列" in msg, "keep file without IncidentID rejected")
 
-        print("explicit columns and errors")
-        out = tmp / "inc.json"
-        run(["--input", str(src), "--output", str(out), "--id-cols", "IncidentID"])
-        check([r["case_id"] for r in load(out)] == ["1001", "1003"],
-              "--id-cols IncidentID: one record per incident")
+        print("random sample of 500")
+        big = tmp / "big" / "narr.txt"
+        big.parent.mkdir()
+        lines = ["IncidentID\tNarrativeLE\tNarrativeCME"]
+        lines += [f"{i}\tLE {i}\tCME {i}" for i in range(1, 2001)]
+        big.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        keep_big = tmp / "keep_big.csv"
+        keep_big.write_text("IncidentID\n" + "\n".join(str(i) for i in range(1, 1501, 1)) + "\n",
+                            encoding="utf-8")
+        out_a = tmp / "sa"
+        log = run(["--input", str(big), "--output", str(out_a), "--keep-ids", str(keep_big)])
+        full = load(out_a / "narratives.json")
+        samp = load(out_a / "narratives_sample_500.json")
+        ids = [int(r["case_id"]) for r in samp]
+        check(len(full) == 1500 and len(samp) == 500, "1500 filtered, 500 sampled")
+        check(len(set(ids)) == 500 and all(1 <= i <= 1500 for i in ids),
+              "sample has no repeats and only filtered cases")
+        check(ids == sorted(ids), "sample kept in file order")
+        check(all(r in full for r in samp[:20]), "sampled records identical to full ones")
+        check("随机抽样 500 个案例（seed=42）" in log, "sample reported")
+        out_b = tmp / "sb"
+        run(["--input", str(big), "--output", str(out_b), "--keep-ids", str(keep_big)])
+        check(load(out_b / "narratives_sample_500.json") == samp, "same seed -> same sample")
+        out_c = tmp / "sc"
+        run(["--input", str(big), "--output", str(out_c), "--keep-ids", str(keep_big),
+             "--seed", "7"])
+        check(load(out_c / "narratives_sample_500.json") != samp, "different seed -> different sample")
+        lo = sum(1 for i in ids if i <= 750)
+        check(150 < lo < 350, f"sample spread over the file ({lo} of 500 in first half)")
+
+        out = tmp / "small.json"
+        log = run(["--input", str(src), "--output", str(out)])
+        check(len(load(tmp / "small_sample_500.json")) == 2, "fewer than 500 -> all kept")
+        check("不足 500" in log, "shortfall reported")
+
+        print("errors")
         msg = expect_exit(["--input", str(src), "--output", str(out), "--le-col", "Nope"])
         check("没有 LE 列" in msg, "wrong LE column named")
         bad = tmp / "bad.txt"
@@ -131,9 +179,9 @@ def main() -> int:
         print("empty result is still valid JSON")
         out = tmp / "empty.json"
         empty_keep = tmp / "empty_keep.csv"
-        empty_keep.write_text("IncidentID,PersonID\n5,5\n", encoding="utf-8")
+        empty_keep.write_text("IncidentID\n5\n", encoding="utf-8")
         run(["--input", str(src), "--output", str(out), "--keep-ids", str(empty_keep)])
-        check(load(out) == [], "[] written")
+        check(load(out) == [] and load(tmp / "empty_sample_500.json") == [], "[] written")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

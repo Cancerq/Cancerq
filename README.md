@@ -918,23 +918,29 @@ python to_pretrain_json.py --input a.csv --output pretrain.jsonl \
 ## 叙述文本转 `{case_id, LE, CME}` JSON：`narratives_to_json.py`
 
 把 NVDRS 叙述文本文件（.txt / .csv / .tsv，Tab、逗号、竖线分隔自动识别）
-整理成每个死者一条：
+按 IncidentID 整理成一案一条，并随机抽 500 条另存：
 
 ```json
 [
-  {"case_id": "1001_1", "LE": "执法叙述原文", "CME": "验尸官/法医叙述原文"}
+  {"case_id": "1001", "LE": "执法叙述原文", "CME": "验尸官/法医叙述原文"}
 ]
 ```
 
 ```bash
-python narratives_to_json.py --input narratives.txt --output Json_folder
-# 只要建筑业案例：
+# 只要建筑业案例（筛选表里只看 IncidentID 一列），再随机抽 500 条
 python narratives_to_json.py --input narratives.txt --output Json_folder \
     --keep-ids construction_cases.csv
 ```
 
-- `case_id` 自动识别：CaseID 一类的单独编号列 → `IncidentID_PersonID` → `IncidentID`；
-  用 `--id-cols` 或配置区 `CASE_ID_COLS` 指定
-- LE / CME 列自动识别（NarrativeLE、NarrativeCME 等），运行时会打印选中了哪几列
+输出（同一文件夹）：
+
+| 文件 | 内容 |
+|---|---|
+| `narratives.json` | 筛选后的全部案例 |
+| `narratives_sample_500.json` | 随机 500 条（`--sample` 改数量，`--seed` 换一批；种子不变结果不变） |
+| `duplicate_case_ids.csv` | 同一 IncidentID 出现多次时被丢掉的行（只留第一条） |
+
+- `case_id` 默认就是 IncidentID；要 `IncidentID_PersonID` 用 `--id-cols IncidentID,PersonID`
+- 筛选永远只按 IncidentID 匹配，筛选表可以只有 IncidentID 一列
 - 叙述保留原文，只统一换行；LE、CME 都空的行丢掉（`--require-both` 要求两者都有）
-- 重复 case_id 只留第一条，明细写进 `duplicate_case_ids.csv`
+- 不足 500 条时全部放进抽样文件，并打印提示

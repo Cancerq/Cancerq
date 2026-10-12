@@ -17,15 +17,20 @@
     LE    NarrativeLE / LE_Narrative / LawEnforcementNarrative ...
     CME   NarrativeCME / CME_Narrative / NarrativeME / CoronerNarrative ...
     case_id
-          填了 CASE_ID_COLS 就用它（多列用 "_" 连起来）；
-          没填时依次找：CaseID 这类单独编号列 -> IncidentID + PersonID -> IncidentID
+          默认就是 IncidentID；
+          填了 CASE_ID_COLS 就用它（多列用 "_" 连起来）
 
 叙述保留原文：只统一换行符、去掉首尾空白，不改正文。
 
 筛选：
     - LE 和 CME 都为空的行丢掉（REQUIRE_BOTH = True 时两者缺一就丢）
     - 同一个 case_id 出现多次只保留第一条，重复的写进 duplicate_case_ids.csv
-    - 填了 KEEP_IDS_FILE（例如建筑业案例表）时，只保留里面出现过的 case_id
+    - 填了 KEEP_IDS_FILE（例如建筑业案例表）时，只保留 IncidentID 出现在表里的案例
+
+输出两个文件（同一个文件夹）：
+
+    narratives.json             筛选后的全部案例
+    narratives_sample_500.json  从中随机抽 SAMPLE_SIZE 条（固定 SEED，重跑结果相同）
 
 用法：把「配置区」填好，然后运行
 
@@ -34,8 +39,8 @@
 或者命令行：
 
     python narratives_to_json.py --input narratives.txt --output out_folder
-    python narratives_to_json.py --input narratives.txt --output out.json \\
-        --keep-ids construction_cases.csv
+    python narratives_to_json.py --input narratives.txt --output out_folder \\
+        --keep-ids construction_cases.csv --sample 500 --seed 42
 
 单文件，只依赖 pandas。分块读写，几 GB 的文件也只占几百 MB 内存。
 """
@@ -46,6 +51,7 @@ import argparse
 import codecs
 import csv
 import json
+import random
 import re
 import sys
 from pathlib import Path
@@ -69,10 +75,16 @@ OUTPUT_PATH = r""        # 例：r"D:\NVDRS\Json_all_and_sampling"
 # 可选
 # -----------------------------------------------------------------------------
 
-# 只保留这个表里出现过的 case_id（例如建筑业案例 CSV）。留空 = 不筛
+# 只保留 IncidentID 出现在这个表里的案例（例如建筑业案例 CSV）。留空 = 不筛
 KEEP_IDS_FILE = r""
 
-# case_id 用哪几列。留空 = 自动识别。例：["IncidentID", "PersonID"]
+# 随机抽多少条另存一份。0 = 不抽
+SAMPLE_SIZE = 500
+
+# 随机种子。不改就每次抽到同样的 500 条；想换一批就改成别的数
+SEED = 42
+
+# case_id 用哪几列。留空 = 只用 IncidentID（自动识别列名）
 CASE_ID_COLS: list[str] = []
 
 # 多列拼 case_id 时的连接符
@@ -114,7 +126,6 @@ CME_CANDIDATES = (
 )
 SINGLE_ID_CANDIDATES = ("caseid", "internalid", "uniqueid", "recordid", "decedentid", "victimid")
 INCIDENT_ID_CANDIDATES = ("incidentid", "incid", "incident")
-PERSON_ID_CANDIDATES = ("personid", "persid", "person", "victimnumber", "personnumber")
 
 NON_ALNUM = re.compile(r"[^0-9a-z]")
 
@@ -137,16 +148,13 @@ def resolve_id_cols(columns: list[str], wanted: list[str], source: str) -> list[
         if missing:
             sys.exit(f"{source} 缺少 case_id 列：{missing}\n现有列：{columns}")
         return list(wanted)
+    incident = find_col(columns, INCIDENT_ID_CANDIDATES)
+    if incident:
+        return [incident]
     single = find_col(columns, SINGLE_ID_CANDIDATES)
     if single:
         return [single]
-    incident = find_col(columns, INCIDENT_ID_CANDIDATES)
-    person = find_col(columns, PERSON_ID_CANDIDATES)
-    if incident and person:
-        return [incident, person]
-    if incident:
-        return [incident]
-    sys.exit(f"{source} 里找不到编号列，请在配置区填 CASE_ID_COLS。\n现有列：{columns}")
+    sys.exit(f"{source} 里找不到 IncidentID 列，请在配置区填 CASE_ID_COLS。\n现有列：{columns}")
 
 
 def resolve_text_col(columns: list[str], wanted: str, candidates: tuple[str, ...],
@@ -204,9 +212,8 @@ def detect_sep(path: Path, encoding: str) -> str:
         header = fh.readline()
     counts = {sep: header.count(sep) for sep in ("\t", "|", ",", ";")}
     sep = max(counts, key=counts.get)
-    if counts[sep] == 0:
-        sys.exit(f"{path.name} 的表头里没有分隔符，读不出列：{header[:200]!r}")
-    return sep
+    # 没有分隔符 = 只有一列（例如只列了 IncidentID 的筛选表）
+    return sep if counts[sep] else ","
 
 
 def read_chunks(path: Path, encoding: str, chunk_size: int) -> Iterator[pd.DataFrame]:
@@ -249,24 +256,28 @@ def make_case_id(values: list, joiner: str) -> str:
     return joiner.join(parts)
 
 
-def load_keep_ids(path_raw: str, id_cols: list[str], joiner: str,
-                  encoding: str, chunk_size: int) -> set[str] | None:
+def find_incident_col(columns: list[str], source: str) -> str:
+    col = find_col(columns, INCIDENT_ID_CANDIDATES)
+    if col is None:
+        sys.exit(f"{source} 里找不到 IncidentID 列。\n现有列：{columns}")
+    return col
+
+
+def load_keep_ids(path_raw: str, encoding: str, chunk_size: int) -> set[str] | None:
+    """筛选表 -> IncidentID 集合。只看 IncidentID 一列。"""
     if not path_raw or not path_raw.strip():
         return None
     path = Path(path_raw.strip()).expanduser()
     if not path.is_file():
         sys.exit(f"找不到 KEEP_IDS_FILE：{path}")
     ids: set[str] = set()
-    cols: list[str] | None = None
+    col: str | None = None
     for chunk in read_chunks(path, encoding, chunk_size):
-        if cols is None:
-            cols = resolve_id_cols(list(chunk.columns), id_cols, path.name)
-            print(f"  筛选表编号列：{' + '.join(cols)}")
-        for values in chunk[cols].itertuples(index=False, name=None):
-            cid = make_case_id(list(values), joiner)
-            if cid:
-                ids.add(cid)
-    print(f"  筛选表里共 {len(ids)} 个 case_id")
+        if col is None:
+            col = find_incident_col(list(chunk.columns), path.name)
+            print(f"  筛选表按 {col} 匹配")
+        ids.update(i for i in map(clean_id, chunk[col]) if i)
+    print(f"  筛选表里共 {len(ids)} 个 IncidentID")
     return ids
 
 
@@ -292,6 +303,49 @@ def open_for_write(path: Path, newline: str = "\n"):
                  "请检查：这个文件是否正被其他程序打开；路径是否指向只读位置。")
 
 
+class JsonArrayWriter:
+    """边读边写 JSON 数组，不用把全部案例攒在内存里。"""
+
+    def __init__(self, path: Path):
+        self.fh = open_for_write(path)
+        self.fh.write("[")
+        self.count = 0
+
+    def write(self, record: dict) -> None:
+        self.fh.write(",\n  " if self.count else "\n  ")
+        self.fh.write(json.dumps(record, ensure_ascii=False))
+        self.count += 1
+
+    def close(self) -> None:
+        self.fh.write("\n]\n" if self.count else "]\n")
+        self.fh.close()
+
+
+class Reservoir:
+    """蓄水池抽样：一遍扫完，等概率抽 k 条，内存里只留 k 条。"""
+
+    def __init__(self, k: int, seed: int):
+        self.k = k
+        self.rng = random.Random(seed)
+        self.items: list[tuple[int, dict]] = []
+        self.seen = 0
+
+    def add(self, record: dict) -> None:
+        if self.k <= 0:
+            return
+        if len(self.items) < self.k:
+            self.items.append((self.seen, record))
+        else:
+            j = self.rng.randrange(self.seen + 1)
+            if j < self.k:
+                self.items[j] = (self.seen, record)
+        self.seen += 1
+
+    def result(self) -> list[dict]:
+        # 按原文件顺序输出，方便和全量文件对照
+        return [rec for _, rec in sorted(self.items, key=lambda t: t[0])]
+
+
 # -----------------------------------------------------------------------------
 # 主流程
 # -----------------------------------------------------------------------------
@@ -300,8 +354,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="NVDRS 叙述文本 -> [{case_id, LE, CME}] JSON")
     ap.add_argument("--input", nargs="+", help="叙述文本文件或文件夹，可多个")
     ap.add_argument("--output", help="输出 .json 文件或文件夹")
-    ap.add_argument("--keep-ids", help="只保留这个表里的 case_id")
-    ap.add_argument("--id-cols", help="case_id 列，逗号分隔，例如 IncidentID,PersonID")
+    ap.add_argument("--keep-ids", help="只保留 IncidentID 在这个表里的案例")
+    ap.add_argument("--sample", type=int, help="随机抽多少条，0 = 不抽（默认 500）")
+    ap.add_argument("--seed", type=int, help="随机种子（默认 42）")
+    ap.add_argument("--id-cols", help="case_id 列，逗号分隔（默认 IncidentID）")
     ap.add_argument("--le-col", help="LE 叙述列名")
     ap.add_argument("--cme-col", help="CME 叙述列名")
     ap.add_argument("--require-both", action="store_true", default=None,
@@ -324,52 +380,71 @@ def main(argv: list[str] | None = None) -> dict:
     cme_cfg = pick(args.cme_col, CME_COL)
     require_both = pick(args.require_both, REQUIRE_BOTH)
     encoding = pick(args.encoding, ENCODING)
+    sample_size = pick(args.sample, SAMPLE_SIZE)
+    seed = pick(args.seed, SEED)
+    if sample_size < 0:
+        sys.exit("SAMPLE_SIZE 不能是负数")
 
-    keep_ids = load_keep_ids(pick(args.keep_ids, KEEP_IDS_FILE), id_cols_cfg,
-                             CASE_ID_JOINER, encoding, CHUNK_SIZE)
+    keep_ids = load_keep_ids(pick(args.keep_ids, KEEP_IDS_FILE), encoding, CHUNK_SIZE)
 
     stats = {"rows": 0, "written": 0, "blank_id": 0, "no_text": 0,
-             "not_in_keep": 0, "duplicate": 0}
+             "not_in_keep": 0, "duplicate": 0, "sampled": 0}
     seen: set[str] = set()
+    matched_incidents: set[str] = set()
     duplicates: list[tuple[str, str, int]] = []
     dup_path = output.with_name("duplicate_case_ids.csv")
+    sample_path = output.with_name(f"{output.stem}_sample_{sample_size}{output.suffix}")
+    reservoir = Reservoir(sample_size, seed)
 
-    with open_for_write(output) as out:
-        out.write("[")
-        for path in files:
-            id_cols = le_col = cme_col = None
-            row_no = 0
-            for chunk in read_chunks(path, encoding, CHUNK_SIZE):
-                if id_cols is None:
-                    columns = list(chunk.columns)
-                    id_cols = resolve_id_cols(columns, id_cols_cfg, path.name)
-                    le_col = resolve_text_col(columns, le_cfg, LE_CANDIDATES, "LE", path.name)
-                    cme_col = resolve_text_col(columns, cme_cfg, CME_CANDIDATES, "CME", path.name)
-                    print(f"  case_id = {' + '.join(id_cols)}   LE = {le_col}   CME = {cme_col}")
-                for values in chunk[id_cols + [le_col, cme_col]].itertuples(index=False, name=None):
-                    row_no += 1
-                    stats["rows"] += 1
-                    case_id = make_case_id(list(values[:-2]), CASE_ID_JOINER)
-                    le, cme = clean_narrative(values[-2]), clean_narrative(values[-1])
-                    if not case_id:
-                        stats["blank_id"] += 1
-                        continue
-                    if (require_both and not (le and cme)) or not (le or cme):
-                        stats["no_text"] += 1
-                        continue
-                    if keep_ids is not None and case_id not in keep_ids:
+    full = JsonArrayWriter(output)
+    for path in files:
+        id_cols = le_col = cme_col = inc_col = None
+        row_no = 0
+        for chunk in read_chunks(path, encoding, CHUNK_SIZE):
+            if id_cols is None:
+                columns = list(chunk.columns)
+                id_cols = resolve_id_cols(columns, id_cols_cfg, path.name)
+                le_col = resolve_text_col(columns, le_cfg, LE_CANDIDATES, "LE", path.name)
+                cme_col = resolve_text_col(columns, cme_cfg, CME_CANDIDATES, "CME", path.name)
+                if keep_ids is not None:
+                    inc_col = find_incident_col(columns, path.name)
+                print(f"  case_id = {' + '.join(id_cols)}   LE = {le_col}   CME = {cme_col}")
+            cols = id_cols + [le_col, cme_col] + ([inc_col] if inc_col else [])
+            for values in chunk[cols].itertuples(index=False, name=None):
+                row_no += 1
+                stats["rows"] += 1
+                n = len(id_cols)
+                case_id = make_case_id(list(values[:n]), CASE_ID_JOINER)
+                le, cme = clean_narrative(values[n]), clean_narrative(values[n + 1])
+                if not case_id:
+                    stats["blank_id"] += 1
+                    continue
+                if (require_both and not (le and cme)) or not (le or cme):
+                    stats["no_text"] += 1
+                    continue
+                if keep_ids is not None:
+                    incident = clean_id(values[n + 2])
+                    if incident not in keep_ids:
                         stats["not_in_keep"] += 1
                         continue
-                    if case_id in seen:
-                        stats["duplicate"] += 1
-                        duplicates.append((case_id, path.name, row_no))
-                        continue
-                    seen.add(case_id)
-                    record = {"case_id": case_id, "LE": le, "CME": cme}
-                    out.write("," if stats["written"] else "")
-                    out.write("\n  " + json.dumps(record, ensure_ascii=False))
-                    stats["written"] += 1
-        out.write("\n]\n" if stats["written"] else "]\n")
+                    matched_incidents.add(incident)
+                if case_id in seen:
+                    stats["duplicate"] += 1
+                    duplicates.append((case_id, path.name, row_no))
+                    continue
+                seen.add(case_id)
+                record = {"case_id": case_id, "LE": le, "CME": cme}
+                full.write(record)
+                reservoir.add(record)
+    full.close()
+    stats["written"] = full.count
+
+    if sample_size:
+        sample = JsonArrayWriter(sample_path)
+        for record in reservoir.result():
+            sample.write(record)
+        sample.close()
+        stats["sampled"] = sample.count
 
     if duplicates:
         with open_for_write(dup_path, newline="") as fh:
@@ -378,18 +453,22 @@ def main(argv: list[str] | None = None) -> dict:
             w.writerows(duplicates)
 
     print()
-    print(f"共读 {stats['rows']} 行，写出 {stats['written']} 个死者 -> {output}")
+    print(f"共读 {stats['rows']} 行，写出 {stats['written']} 个案例 -> {output}")
+    if sample_size:
+        print(f"随机抽样 {stats['sampled']} 个案例（seed={seed}） -> {sample_path}")
+        if stats["written"] < sample_size:
+            print(f"注意：筛选后只有 {stats['written']} 个案例，不足 {sample_size}，已全部放进抽样文件")
     if stats["blank_id"]:
         print(f"丢弃 编号为空     {stats['blank_id']}")
     if stats["no_text"]:
         what = "LE 或 CME 为空" if require_both else "LE 和 CME 都为空"
         print(f"丢弃 {what}  {stats['no_text']}")
     if stats["not_in_keep"]:
-        print(f"丢弃 不在筛选表里 {stats['not_in_keep']}")
+        print(f"丢弃 IncidentID 不在筛选表里 {stats['not_in_keep']}")
     if keep_ids is not None:
-        missing = len(keep_ids - seen)
+        missing = len(keep_ids - matched_incidents)
         if missing:
-            print(f"注意：筛选表里有 {missing} 个 case_id 在叙述文件里没找到")
+            print(f"注意：筛选表里有 {missing} 个 IncidentID 在叙述文件里没找到")
     if duplicates:
         print(f"丢弃 重复 case_id {stats['duplicate']}（只留第一条，明细见 {dup_path}）")
     return stats

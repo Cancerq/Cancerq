@@ -1,0 +1,891 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVDRS 叙述标注</title>
+<!--
+  NVDRS 叙述人工标注工具 —— 单文件、离线。
+  数据只在本机浏览器里读取，不上传任何地方；标注自动存在本机浏览器（localStorage），
+  换电脑或清浏览器数据会丢，所以记得定期点「导出」。
+
+  读入：narratives_to_json.py 生成的 JSON 数组（[{case_id, LE, CME, ...}]），也支持 JSONL。
+  除 case_id / LE / CME 外的字段（例如 Age、Sex、Year）会自动变成左侧的筛选条件。
+-->
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --text: #1d2330; --muted: #5d6676;
+  --border: #d9dde4; --accent: #2f6fde; --accent-text: #ffffff; --accent-soft: #e3ecfc;
+  --mark: #ffe58a; --ok: #1f8a4c; --warn: #b26a00; --danger: #c23b3b;
+  --shadow: 0 1px 2px rgba(20,30,50,.06), 0 2px 8px rgba(20,30,50,.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14171c; --panel: #1c2027; --panel-2: #242a33; --text: #e6e9ef; --muted: #9aa3b2;
+    --border: #333a46; --accent: #6b9cff; --accent-text: #0e1420; --accent-soft: #23314d;
+    --mark: #6b5a12; --ok: #52c483; --warn: #e0a84a; --danger: #ef7676;
+    --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14171c; --panel: #1c2027; --panel-2: #242a33; --text: #e6e9ef; --muted: #9aa3b2;
+  --border: #333a46; --accent: #6b9cff; --accent-text: #0e1420; --accent-soft: #23314d;
+  --mark: #6b5a12; --ok: #52c483; --warn: #e0a84a; --danger: #ef7676;
+  --shadow: none;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 14px/1.55 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button {
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 5px 10px; cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: default; }
+input[type=text], input[type=number], select, textarea {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px;
+  width: 100%;
+}
+input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+header {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
+}
+header h1 { font-size: 16px; margin: 0 12px 0 0; }
+header .grow { flex: 1; }
+#progress { color: var(--muted); font-size: 13px; }
+#progressBar { width: 140px; height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
+#progressBar > div { height: 100%; background: var(--ok); width: 0; }
+
+#app { display: grid; grid-template-columns: 300px minmax(0, 1fr); height: calc(100% - 53px); }
+aside {
+  border-right: 1px solid var(--border); background: var(--panel);
+  display: flex; flex-direction: column; min-height: 0;
+}
+#filters { padding: 12px 14px; overflow-y: auto; border-bottom: 1px solid var(--border); max-height: 55%; }
+.f { margin-bottom: 10px; }
+.f > label, .f > .lbl { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+.row { display: flex; gap: 6px; align-items: center; }
+.row > * { flex: 1; min-width: 0; }
+.check { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+.check input { width: auto; }
+.section-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 6px; }
+#listHead { padding: 8px 14px; font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
+#list { overflow-y: auto; flex: 1; min-height: 0; }
+.item {
+  display: flex; gap: 8px; align-items: center; width: 100%; text-align: left;
+  border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent;
+  padding: 7px 14px;
+}
+.item.active { background: var(--accent-soft); }
+.item .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--border); }
+.item .dot.partial { background: var(--warn); }
+.item .dot.done { background: var(--ok); }
+.item .id { font-variant-numeric: tabular-nums; flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item .snip { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+main { overflow-y: auto; padding: 16px; min-width: 0; }
+#empty { max-width: 640px; margin: 40px auto; text-align: center; color: var(--muted); }
+#empty .drop {
+  border: 2px dashed var(--border); border-radius: 10px; padding: 36px 20px; margin-top: 16px; background: var(--panel);
+}
+#empty .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
+#caseHead { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 14px; margin-bottom: 12px; }
+#caseHead .cid { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+#caseHead .pos { color: var(--muted); }
+#meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 1px 9px; font-size: 12px; }
+#texts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.text { padding: 12px 14px; min-width: 0; }
+.text h3 { margin: 0 0 6px; font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; }
+.text .body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.7; }
+.text .none { color: var(--muted); font-style: italic; }
+mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1px; }
+#labels { padding: 12px 14px; }
+.lf { padding: 8px 10px; border-radius: 8px; border: 1px solid transparent; margin-bottom: 6px; }
+.lf.activeField { border-color: var(--accent); background: var(--accent-soft); }
+.lf .name { font-weight: 600; margin-bottom: 6px; display: flex; justify-content: space-between; gap: 8px; }
+.lf .name small { color: var(--muted); font-weight: 400; }
+.opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.opt.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.opt kbd { font-size: 11px; opacity: .7; margin-right: 4px; font-family: inherit; }
+.hint { color: var(--muted); font-size: 12px; }
+#dist { display: flex; flex-direction: column; gap: 4px; }
+.bar { display: grid; grid-template-columns: 1fr 44px; gap: 6px; align-items: center; font-size: 12px; }
+.bar .track { position: relative; height: 18px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
+.bar .fill { position: absolute; inset: 0 auto 0 0; background: var(--accent-soft); border-right: 2px solid var(--accent); }
+.bar .lab { position: relative; padding: 0 6px; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar .n { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+
+dialog { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); width: min(640px, calc(100% - 32px)); }
+dialog::backdrop { background: rgba(0,0,0,.35); }
+dialog textarea { height: 220px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+#toast {
+  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg);
+  padding: 8px 14px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px);
+}
+#toast.show { opacity: 1; }
+.hidden { display: none !important; }
+
+@media (max-width: 900px) {
+  #app { grid-template-columns: minmax(0, 1fr); height: auto; }
+  aside { border-right: 0; border-bottom: 1px solid var(--border); min-width: 0; }
+  #filters { max-height: none; }
+  #list { max-height: 260px; }
+  #texts { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>NVDRS 叙述标注</h1>
+  <button id="btnOpen" class="primary">打开 JSON</button>
+  <input id="fileInput" type="file" accept=".json,.jsonl,application/json" hidden>
+  <button id="btnImport" disabled title="读入之前导出的标注 JSON，按 case_id 合并">导入标注</button>
+  <input id="importInput" type="file" accept=".json" hidden>
+  <button id="btnSchema">标注字段</button>
+  <button id="btnExportJson" disabled>导出 JSON</button>
+  <button id="btnExportCsv" disabled>导出 CSV</button>
+  <span class="grow"></span>
+  <div id="progressBar"><div></div></div>
+  <span id="progress"></span>
+  <button id="btnTheme" title="切换明暗">◐</button>
+</header>
+
+<div id="app">
+  <aside>
+    <div id="filters">
+      <div class="f">
+        <label for="q">关键词（空格分隔 = 同时包含）</label>
+        <input id="q" type="text" placeholder="例如 fall scaffold">
+        <div class="row" style="margin-top:6px">
+          <select id="qIn" style="flex:2">
+            <option value="all">LE + CME</option>
+            <option value="LE">只搜 LE</option>
+            <option value="CME">只搜 CME</option>
+            <option value="id">只搜 case_id</option>
+          </select>
+          <label class="check"><input id="qRegex" type="checkbox">正则</label>
+          <label class="check"><input id="qNot" type="checkbox">排除</label>
+        </div>
+      </div>
+      <div class="f">
+        <label for="fStatus">标注状态</label>
+        <select id="fStatus">
+          <option value="all">全部</option>
+          <option value="none">未标注</option>
+          <option value="partial">部分标注</option>
+          <option value="done">已完成</option>
+          <option value="notdone">未完成（未标注 + 部分）</option>
+        </select>
+      </div>
+      <div class="f row">
+        <div><label for="fLE">LE</label>
+          <select id="fLE"><option value="">任意</option><option value="has">有</option><option value="no">空</option></select></div>
+        <div><label for="fCME">CME</label>
+          <select id="fCME"><option value="">任意</option><option value="has">有</option><option value="no">空</option></select></div>
+      </div>
+      <div class="f">
+        <label>叙述总字数</label>
+        <div class="row"><input id="lenMin" type="number" min="0" placeholder="最少"><input id="lenMax" type="number" min="0" placeholder="最多"></div>
+      </div>
+      <div id="labelFilters"></div>
+      <div id="metaFilters"></div>
+      <div class="f row" style="margin-top:12px">
+        <select id="sortBy">
+          <option value="orig">原顺序</option>
+          <option value="id">按 case_id</option>
+          <option value="lenDesc">字数多→少</option>
+          <option value="lenAsc">字数少→多</option>
+          <option value="recent">最近标注</option>
+        </select>
+        <button id="btnReset">清空筛选</button>
+      </div>
+      <div class="section-title">筛选结果分布</div>
+      <div class="f">
+        <select id="distField"></select>
+        <div id="dist" style="margin-top:6px"></div>
+      </div>
+    </div>
+    <div id="listHead"><span id="listCount">—</span><span class="hint">J/K 上下条</span></div>
+    <div id="list" role="listbox" aria-label="案例列表"></div>
+  </aside>
+
+  <main>
+    <div id="empty">
+      <p>打开 <code>narratives_to_json.py</code> 生成的 JSON（全量或 sample_500 都行）。</p>
+      <p class="hint">数据只在本机浏览器里读取，不会上传。标注会自动保存在本浏览器，但仍请定期导出备份。</p>
+      <div class="drop" id="drop">把 JSON 文件拖到这里，或点上面的「打开 JSON」</div>
+    </div>
+    <div id="view" class="hidden">
+      <div id="caseHead" class="card">
+        <button id="btnPrev" title="上一条 (K / ←)">◀</button>
+        <span class="cid" id="cid"></span>
+        <span class="pos" id="pos"></span>
+        <button id="btnNext" title="下一条 (J / →)">▶</button>
+        <button id="btnNextTodo" title="跳到下一条未完成 (N)">下一条未完成 ⏭</button>
+        <span style="flex:1"></span>
+        <div id="meta"></div>
+      </div>
+      <div id="texts">
+        <section class="card text"><h3><span>LE · 执法叙述</span><span id="leLen"></span></h3><div class="body" id="leBody"></div></section>
+        <section class="card text"><h3><span>CME · 验尸官 / 法医叙述</span><span id="cmeLen"></span></h3><div class="body" id="cmeBody"></div></section>
+      </div>
+      <section id="labels" class="card">
+        <div id="labelFields"></div>
+        <div class="row" style="justify-content:space-between; margin-top:6px; flex-wrap:wrap">
+          <label class="check" style="flex:none"><input id="autoAdvance" type="checkbox" checked>选完所有单选字段后自动下一条</label>
+          <button id="btnClear" style="flex:none">清除本条标注</button>
+        </div>
+        <p class="hint" style="margin:8px 0 0">快捷键：数字 1–9 选当前字段（蓝框）的选项 · [ / ] 切换字段 · J / → 下一条 · K / ← 上一条 · N 下一条未完成 · / 搜索</p>
+      </section>
+    </div>
+  </main>
+</div>
+
+<dialog id="schemaDlg">
+  <h3 style="margin-top:0">标注字段</h3>
+  <p class="hint">一行一个字段：<code>字段名 | 类型 | 选项1, 选项2, ...</code>。类型：<code>single</code> 单选、<code>multi</code> 多选、<code>text</code> 文本。
+    改字段名会被当成新字段；已标的值按字段名保留。</p>
+  <textarea id="schemaText" spellcheck="false"></textarea>
+  <p id="schemaErr" class="hint" style="color:var(--danger)"></p>
+  <div class="row" style="justify-content:flex-end">
+    <button id="schemaDefault" style="flex:none">恢复示例</button>
+    <button id="schemaCancel" style="flex:none">取消</button>
+    <button id="schemaSave" class="primary" style="flex:none">保存</button>
+  </div>
+</dialog>
+
+<div id="toast" role="status"></div>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------------------
+// 状态
+// ---------------------------------------------------------------------------
+const DEFAULT_SCHEMA_TEXT = [
+  "与工作相关 | single | 是, 否, 不确定",
+  "主要诱因 | multi | 工作/经济压力, 伴侣/家庭冲突, 身体健康, 精神健康, 酒精/药物, 法律问题, 其他",
+  "叙述质量 | single | 信息充分, 信息不足",
+  "备注 | text",
+].join("\n");
+
+const S = {
+  fileName: "", records: [], byId: new Map(), metaKeys: [], metaInfo: {},
+  schema: [], labels: {}, filtered: [], cur: -1, activeField: 0,
+};
+const $ = (id) => document.getElementById(id);
+const storeKey = () => "nvdrs-label:" + S.fileName + ":" + S.records.length;
+
+function lsGet(key, fallback) {
+  try { const v = localStorage.getItem(key); return v == null ? fallback : JSON.parse(v); }
+  catch (e) { return fallback; }
+}
+function lsSet(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+  catch (e) { return false; }
+}
+
+let toastTimer = 0;
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// ---------------------------------------------------------------------------
+// 标注字段
+// ---------------------------------------------------------------------------
+function parseSchema(text) {
+  const out = [], names = new Set();
+  text.split(/\r?\n/).forEach((line, i) => {
+    if (!line.trim() || line.trim().startsWith("#")) return;
+    const parts = line.split("|").map((p) => p.trim());
+    const name = parts[0], type = (parts[1] || "single").toLowerCase();
+    if (!name) throw new Error(`第 ${i + 1} 行没有字段名`);
+    if (["case_id", "LE", "CME"].includes(name)) throw new Error(`字段名不能用 ${name}`);
+    if (names.has(name)) throw new Error(`字段名重复：${name}`);
+    if (!["single", "multi", "text"].includes(type)) throw new Error(`第 ${i + 1} 行类型要是 single / multi / text`);
+    const options = type === "text" ? [] : (parts[2] || "").split(/[,，]/).map((o) => o.trim()).filter(Boolean);
+    if (type !== "text" && !options.length) throw new Error(`字段「${name}」没有选项`);
+    names.add(name);
+    out.push({ name, type, options });
+  });
+  if (!out.length) throw new Error("至少要一个字段");
+  return out;
+}
+function schemaToText(schema) {
+  return schema.map((f) => f.type === "text" ? `${f.name} | text` : `${f.name} | ${f.type} | ${f.options.join(", ")}`).join("\n");
+}
+function loadSchema() {
+  try { S.schema = parseSchema(lsGet("nvdrs-label:schema", DEFAULT_SCHEMA_TEXT)); }
+  catch (e) { S.schema = parseSchema(DEFAULT_SCHEMA_TEXT); }
+}
+const choiceFields = () => S.schema.filter((f) => f.type !== "text");
+
+// 单条状态：none / partial / done（所有单选、多选字段都有值 = done）
+function statusOf(id) {
+  const lab = S.labels[id];
+  if (!lab) return "none";
+  const filled = S.schema.filter((f) => isFilled(lab[f.name])).length;
+  if (!filled) return "none";
+  return choiceFields().every((f) => isFilled(lab[f.name])) ? "done" : "partial";
+}
+function isFilled(v) { return Array.isArray(v) ? v.length > 0 : v != null && String(v).trim() !== ""; }
+
+// ---------------------------------------------------------------------------
+// 读文件
+// ---------------------------------------------------------------------------
+function parseData(text) {
+  text = text.replace(/^﻿/, "");
+  const trimmed = text.trim();
+  let rows;
+  if (trimmed.startsWith("[")) rows = JSON.parse(trimmed);
+  else rows = trimmed.split(/\r?\n/).filter((l) => l.trim()).map((l, i) => {
+    try { return JSON.parse(l); } catch (e) { throw new Error(`JSONL 第 ${i + 1} 行不是合法 JSON`); }
+  });
+  if (!Array.isArray(rows) || !rows.length) throw new Error("文件里没有案例");
+  return rows;
+}
+
+function loadRecords(rows, fileName) {
+  const labelNames = new Set(S.schema.map((f) => f.name));
+  const seen = new Set();
+  const recs = [];
+  const carried = {};
+  rows.forEach((r, i) => {
+    if (!r || typeof r !== "object") return;
+    let id = r.case_id ?? r.IncidentID ?? r.id;
+    id = id == null || id === "" ? `#${i + 1}` : String(id);
+    if (seen.has(id)) id = `${id}#${i + 1}`;
+    seen.add(id);
+    const rec = { _i: i, id, LE: str(r.LE ?? r.NarrativeLE), CME: str(r.CME ?? r.NarrativeCME), meta: {} };
+    for (const [k, v] of Object.entries(r)) {
+      if (["case_id", "LE", "CME", "NarrativeLE", "NarrativeCME", "labeled_at"].includes(k)) continue;
+      if (labelNames.has(k)) { (carried[id] ||= {})[k] = v; continue; }   // 读入已导出的文件：带回标注
+      if (v !== null && typeof v === "object") continue;
+      rec.meta[k] = v == null ? "" : String(v);
+    }
+    rec.len = rec.LE.length + rec.CME.length;
+    recs.push(rec);
+  });
+  S.fileName = fileName;
+  S.records = recs;
+  S.byId = new Map(recs.map((r) => [r.id, r]));
+  S.labels = lsGet(storeKey(), {});
+  let n = 0;
+  for (const [id, lab] of Object.entries(carried)) {
+    if (!S.labels[id]) { S.labels[id] = normalizeLabel(lab); n++; }
+  }
+  if (n) saveLabels();
+  analyzeMeta();
+  buildFilterUI();
+  S.cur = -1;
+  $("empty").classList.add("hidden");
+  $("view").classList.remove("hidden");
+  ["btnImport", "btnExportJson", "btnExportCsv"].forEach((b) => ($(b).disabled = false));
+  applyFilters(true);
+  const done = Object.keys(S.labels).filter((id) => S.byId.has(id) && statusOf(id) !== "none").length;
+  toast(`读入 ${recs.length} 条` + (done ? `，已有 ${done} 条标注` : ""));
+}
+function str(v) { return v == null ? "" : String(v); }
+
+function normalizeLabel(lab) {
+  const out = {};
+  for (const f of S.schema) {
+    let v = lab[f.name];
+    if (v == null || v === "") continue;
+    if (f.type === "multi") {
+      v = Array.isArray(v) ? v : String(v).split(/;\s*/);
+      v = v.map(String).filter((x) => x);
+    } else v = String(v);
+    if (isFilled(v)) out[f.name] = v;
+  }
+  out._t = lab._t || Date.now();
+  return out;
+}
+
+function analyzeMeta() {
+  const keys = new Set();
+  S.records.forEach((r) => Object.keys(r.meta).forEach((k) => keys.add(k)));
+  S.metaKeys = [...keys];
+  S.metaInfo = {};
+  for (const k of S.metaKeys) {
+    const counts = new Map();
+    let numeric = true, nonEmpty = 0;
+    for (const r of S.records) {
+      const v = r.meta[k] ?? "";
+      counts.set(v, (counts.get(v) || 0) + 1);
+      if (v !== "") { nonEmpty++; if (!isFinite(Number(v))) numeric = false; }
+    }
+    const distinct = counts.size;
+    const kind = numeric && nonEmpty && distinct > 12 ? "range" : distinct <= 40 ? "cat" : "text";
+    S.metaInfo[k] = { kind, values: [...counts.entries()].sort((a, b) => b[1] - a[1]) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 筛选 UI
+// ---------------------------------------------------------------------------
+function buildFilterUI() {
+  const lf = $("labelFilters");
+  lf.innerHTML = '<div class="section-title">按标注筛选</div>';
+  for (const f of choiceFields()) {
+    const opts = ['<option value="">任意</option>', '<option value="__empty">（未填）</option>',
+      '<option value="__filled">（已填）</option>']
+      .concat(f.options.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`)).join("");
+    lf.insertAdjacentHTML("beforeend",
+      `<div class="f"><label>${esc(f.name)}</label><select data-label="${esc(f.name)}">${opts}</select></div>`);
+  }
+  const textF = S.schema.filter((f) => f.type === "text");
+  for (const f of textF) {
+    lf.insertAdjacentHTML("beforeend",
+      `<div class="f"><label>${esc(f.name)} 包含</label><input type="text" data-labeltext="${esc(f.name)}"></div>`);
+  }
+
+  const mf = $("metaFilters");
+  mf.innerHTML = S.metaKeys.length ? '<div class="section-title">按数据特征筛选</div>' : "";
+  for (const k of S.metaKeys) {
+    const info = S.metaInfo[k];
+    let ctl;
+    if (info.kind === "cat") {
+      ctl = `<select data-meta="${esc(k)}"><option value="">任意</option>` +
+        info.values.map(([v, n]) => `<option value="${esc(v)}">${v === "" ? "（空）" : esc(v)}  · ${n}</option>`).join("") + "</select>";
+    } else if (info.kind === "range") {
+      ctl = `<div class="row"><input type="number" data-metamin="${esc(k)}" placeholder="最小"><input type="number" data-metamax="${esc(k)}" placeholder="最大"></div>`;
+    } else {
+      ctl = `<input type="text" data-metatext="${esc(k)}" placeholder="包含">`;
+    }
+    mf.insertAdjacentHTML("beforeend", `<div class="f"><label>${esc(k)}</label>${ctl}</div>`);
+  }
+  document.querySelectorAll("#labelFilters select, #labelFilters input, #metaFilters select, #metaFilters input")
+    .forEach((el) => el.addEventListener("input", () => applyFilters()));
+
+  const df = $("distField");
+  const prev = df.value;
+  df.innerHTML = choiceFields().map((f) => `<option value="L:${esc(f.name)}">标注：${esc(f.name)}</option>`).join("") +
+    S.metaKeys.filter((k) => S.metaInfo[k].kind === "cat").map((k) => `<option value="M:${esc(k)}">特征：${esc(k)}</option>`).join("");
+  if ([...df.options].some((o) => o.value === prev)) df.value = prev;
+}
+
+function buildMatcher() {
+  const raw = $("q").value.trim();
+  if (!raw) return null;
+  if ($("qRegex").checked) {
+    try { const re = new RegExp(raw, "i"); return { test: (s) => re.test(s), hl: new RegExp(raw, "gi") }; }
+    catch (e) { return { bad: true }; }
+  }
+  const terms = raw.toLowerCase().split(/\s+/).filter(Boolean);
+  const hl = new RegExp(terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "gi");
+  return { test: (s) => { s = s.toLowerCase(); return terms.every((t) => s.includes(t)); }, hl };
+}
+
+let matcher = null;
+function applyFilters(keepPos) {
+  const curId = S.filtered[S.cur]?.id;
+  matcher = buildMatcher();
+  $("q").style.borderColor = matcher && matcher.bad ? "var(--danger)" : "";
+  const qIn = $("qIn").value, qNot = $("qNot").checked;
+  const status = $("fStatus").value, fLE = $("fLE").value, fCME = $("fCME").value;
+  const lenMin = num($("lenMin").value), lenMax = num($("lenMax").value);
+  const labelSel = [...document.querySelectorAll("[data-label]")].filter((e) => e.value).map((e) => [e.dataset.label, e.value]);
+  const labelTxt = [...document.querySelectorAll("[data-labeltext]")].filter((e) => e.value.trim()).map((e) => [e.dataset.labeltext, e.value.trim().toLowerCase()]);
+  const metaSel = [...document.querySelectorAll("[data-meta]")].filter((e) => e.value !== "" || e.selectedIndex > 0).map((e) => [e.dataset.meta, e.value]);
+  const metaMin = [...document.querySelectorAll("[data-metamin]")].filter((e) => e.value !== "").map((e) => [e.dataset.metamin, Number(e.value)]);
+  const metaMax = [...document.querySelectorAll("[data-metamax]")].filter((e) => e.value !== "").map((e) => [e.dataset.metamax, Number(e.value)]);
+  const metaTxt = [...document.querySelectorAll("[data-metatext]")].filter((e) => e.value.trim()).map((e) => [e.dataset.metatext, e.value.trim().toLowerCase()]);
+
+  const out = S.records.filter((r) => {
+    if (matcher && !matcher.bad) {
+      const hay = qIn === "LE" ? r.LE : qIn === "CME" ? r.CME : qIn === "id" ? r.id : r.LE + "\n" + r.CME;
+      if (matcher.test(hay) === qNot) return false;
+    }
+    if (fLE && (fLE === "has") !== !!r.LE) return false;
+    if (fCME && (fCME === "has") !== !!r.CME) return false;
+    if (lenMin != null && r.len < lenMin) return false;
+    if (lenMax != null && r.len > lenMax) return false;
+    if (status !== "all") {
+      const st = statusOf(r.id);
+      if (status === "notdone" ? st === "done" : st !== status) return false;
+    }
+    const lab = S.labels[r.id] || {};
+    for (const [name, want] of labelSel) {
+      const v = lab[name];
+      if (want === "__empty") { if (isFilled(v)) return false; }
+      else if (want === "__filled") { if (!isFilled(v)) return false; }
+      else if (Array.isArray(v) ? !v.includes(want) : v !== want) return false;
+    }
+    for (const [name, t] of labelTxt) if (!String(lab[name] || "").toLowerCase().includes(t)) return false;
+    for (const [k, v] of metaSel) if ((r.meta[k] ?? "") !== v) return false;
+    for (const [k, v] of metaMin) { const x = num(r.meta[k]); if (x == null || x < v) return false; }
+    for (const [k, v] of metaMax) { const x = num(r.meta[k]); if (x == null || x > v) return false; }
+    for (const [k, t] of metaTxt) if (!String(r.meta[k] ?? "").toLowerCase().includes(t)) return false;
+    return true;
+  });
+
+  const sort = $("sortBy").value;
+  if (sort === "id") out.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+  else if (sort === "lenDesc") out.sort((a, b) => b.len - a.len);
+  else if (sort === "lenAsc") out.sort((a, b) => a.len - b.len);
+  else if (sort === "recent") out.sort((a, b) => (S.labels[b.id]?._t || 0) - (S.labels[a.id]?._t || 0));
+
+  S.filtered = out;
+  let idx = curId != null ? out.findIndex((r) => r.id === curId) : -1;
+  if (idx < 0) idx = out.length ? (keepPos && S.cur >= 0 ? Math.min(S.cur, out.length - 1) : 0) : -1;
+  S.cur = idx;
+  renderList();
+  renderCase();
+  renderDist();
+  renderProgress();
+}
+function num(v) { if (v == null || String(v).trim() === "") return null; const n = Number(v); return isFinite(n) ? n : null; }
+
+// ---------------------------------------------------------------------------
+// 渲染
+// ---------------------------------------------------------------------------
+const LIST_LIMIT = 3000;
+function renderList() {
+  const list = $("list");
+  const shown = S.filtered.slice(0, LIST_LIMIT);
+  $("listCount").textContent = `筛选出 ${S.filtered.length} / ${S.records.length} 条` +
+    (S.filtered.length > LIST_LIMIT ? `（列表只显示前 ${LIST_LIMIT}）` : "");
+  list.innerHTML = shown.map((r, i) => {
+    const st = statusOf(r.id);
+    const snip = (r.LE || r.CME).slice(0, 90);
+    return `<button class="item${i === S.cur ? " active" : ""}" data-i="${i}" role="option">` +
+      `<span class="dot ${st}"></span><span class="id">${esc(r.id)}</span><span class="snip">${esc(snip)}</span></button>`;
+  }).join("");
+}
+function refreshListItem(i) {
+  const el = $("list").querySelector(`[data-i="${i}"]`);
+  if (el) el.querySelector(".dot").className = "dot " + statusOf(S.filtered[i].id);
+}
+function highlight(text) {
+  if (!text) return '<span class="none">（空）</span>';
+  if (!matcher || matcher.bad || !matcher.hl) return esc(text);
+  let out = "", last = 0;
+  const re = new RegExp(matcher.hl.source, matcher.hl.flags.includes("g") ? matcher.hl.flags : matcher.hl.flags + "g");
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if (m[0] === "") { re.lastIndex++; continue; }
+    out += esc(text.slice(last, m.index)) + "<mark>" + esc(m[0]) + "</mark>";
+    last = m.index + m[0].length;
+  }
+  return out + esc(text.slice(last));
+}
+
+function renderCase() {
+  const r = S.filtered[S.cur];
+  $("view").style.opacity = r ? 1 : .5;
+  if (!r) {
+    $("cid").textContent = "没有符合条件的案例"; $("pos").textContent = "";
+    $("leBody").innerHTML = $("cmeBody").innerHTML = ""; $("labelFields").innerHTML = ""; $("meta").innerHTML = "";
+    return;
+  }
+  $("cid").textContent = r.id;
+  $("pos").textContent = `第 ${S.cur + 1} / ${S.filtered.length} 条`;
+  $("btnPrev").disabled = S.cur <= 0;
+  $("btnNext").disabled = S.cur >= S.filtered.length - 1;
+  $("meta").innerHTML = Object.entries(r.meta).filter(([, v]) => v !== "")
+    .map(([k, v]) => `<span class="chip">${esc(k)}: ${esc(v)}</span>`).join("");
+  $("leBody").innerHTML = highlight(r.LE);
+  $("cmeBody").innerHTML = highlight(r.CME);
+  $("leLen").textContent = r.LE ? `${r.LE.length} 字` : "";
+  $("cmeLen").textContent = r.CME ? `${r.CME.length} 字` : "";
+  renderLabelFields();
+  const active = $("list").querySelector(".item.active");
+  if (active) active.scrollIntoView({ block: "nearest" });
+}
+
+function renderLabelFields() {
+  const r = S.filtered[S.cur];
+  if (!r) return;
+  const lab = S.labels[r.id] || {};
+  const wrap = $("labelFields");
+  wrap.innerHTML = "";
+  S.schema.forEach((f, fi) => {
+    const box = document.createElement("div");
+    box.className = "lf" + (fi === S.activeField ? " activeField" : "");
+    box.dataset.fi = fi;
+    const kindTxt = f.type === "single" ? "单选" : f.type === "multi" ? "多选" : "文本";
+    box.innerHTML = `<div class="name"><span>${esc(f.name)}</span><small>${kindTxt}</small></div>`;
+    if (f.type === "text") {
+      const ta = document.createElement("textarea");
+      ta.rows = 2; ta.value = lab[f.name] || ""; ta.placeholder = "输入后自动保存";
+      ta.addEventListener("input", () => setLabel(r.id, f.name, ta.value, true));
+      ta.addEventListener("focus", () => setActive(fi));
+      box.appendChild(ta);
+    } else {
+      const opts = document.createElement("div");
+      opts.className = "opts";
+      f.options.forEach((o, oi) => {
+        const on = f.type === "multi" ? (lab[f.name] || []).includes(o) : lab[f.name] === o;
+        const b = document.createElement("button");
+        b.className = "opt" + (on ? " on" : "");
+        b.innerHTML = (oi < 9 ? `<kbd>${oi + 1}</kbd>` : "") + esc(o);
+        b.addEventListener("click", () => { setActive(fi, true); choose(fi, oi); });
+        opts.appendChild(b);
+      });
+      box.appendChild(opts);
+    }
+    box.addEventListener("mousedown", () => setActive(fi, true));
+    wrap.appendChild(box);
+  });
+}
+function setActive(fi, quiet) {
+  if (fi === S.activeField) return;
+  S.activeField = fi;
+  document.querySelectorAll(".lf").forEach((el) => el.classList.toggle("activeField", Number(el.dataset.fi) === fi));
+}
+
+function renderDist() {
+  const sel = $("distField").value, box = $("dist");
+  if (!sel || !S.filtered.length) { box.innerHTML = '<span class="hint">—</span>'; return; }
+  const kind = sel[0], name = sel.slice(2), counts = new Map();
+  let order = [];
+  if (kind === "L") {
+    const f = S.schema.find((x) => x.name === name); if (!f) return;
+    order = f.options.concat(["（未填）"]);
+    for (const r of S.filtered) {
+      const v = (S.labels[r.id] || {})[name];
+      const vals = Array.isArray(v) ? (v.length ? v : ["（未填）"]) : [isFilled(v) ? v : "（未填）"];
+      vals.forEach((x) => counts.set(x, (counts.get(x) || 0) + 1));
+    }
+  } else {
+    for (const r of S.filtered) { const v = r.meta[name] || "（空）"; counts.set(v, (counts.get(v) || 0) + 1); }
+    order = [...counts.keys()].sort((a, b) => counts.get(b) - counts.get(a)).slice(0, 15);
+  }
+  const max = Math.max(1, ...order.map((k) => counts.get(k) || 0));
+  box.innerHTML = order.map((k) => {
+    const n = counts.get(k) || 0;
+    return `<div class="bar"><div class="track"><div class="fill" style="width:${(n / max) * 100}%"></div>` +
+      `<div class="lab">${esc(k)}</div></div><div class="n">${n}</div></div>`;
+  }).join("");
+}
+
+function renderProgress() {
+  const total = S.records.length;
+  let done = 0, partial = 0;
+  for (const r of S.records) { const st = statusOf(r.id); if (st === "done") done++; else if (st === "partial") partial++; }
+  $("progress").textContent = total ? `已完成 ${done} / ${total}` + (partial ? ` · 部分 ${partial}` : "") : "";
+  $("progressBar").firstElementChild.style.width = total ? `${(done / total) * 100}%` : "0";
+}
+
+// ---------------------------------------------------------------------------
+// 标注
+// ---------------------------------------------------------------------------
+let saveTimer = 0;
+function saveLabels() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    if (!lsSet(storeKey(), S.labels)) toast("⚠ 浏览器不允许本地保存，请及时导出！");
+  }, 150);
+}
+function setLabel(id, name, value, quiet) {
+  const lab = (S.labels[id] ||= {});
+  if (isFilled(value)) lab[name] = value; else delete lab[name];
+  lab._t = Date.now();
+  if (!S.schema.some((f) => isFilled(lab[f.name]))) delete S.labels[id];
+  saveLabels();
+  refreshListItem(S.cur);
+  renderProgress();
+  if (!quiet) { renderLabelFields(); renderDist(); }
+}
+function choose(fi, oi) {
+  const r = S.filtered[S.cur], f = S.schema[fi];
+  if (!r || !f || f.type === "text" || oi >= f.options.length) return;
+  const o = f.options[oi], cur = (S.labels[r.id] || {})[f.name];
+  if (f.type === "multi") {
+    const arr = Array.isArray(cur) ? cur.slice() : [];
+    const at = arr.indexOf(o);
+    if (at >= 0) arr.splice(at, 1); else arr.push(o);
+    setLabel(r.id, f.name, f.options.filter((x) => arr.includes(x)));
+  } else {
+    setLabel(r.id, f.name, cur === o ? "" : o);
+    if (cur !== o) {
+      const singles = S.schema.map((x, i) => [x, i]).filter(([x]) => x.type === "single");
+      const nextEmpty = singles.find(([x, i]) => i > fi && !isFilled((S.labels[r.id] || {})[x.name]));
+      const allSingleDone = singles.every(([x]) => isFilled((S.labels[r.id] || {})[x.name]));
+      if (nextEmpty) setActive(nextEmpty[1]);
+      else if (allSingleDone && $("autoAdvance").checked && fi === singles[singles.length - 1]?.[1]) {
+        setTimeout(() => go(1, true), 120);
+      }
+    }
+  }
+}
+
+function go(delta, resetField) {
+  const n = S.cur + delta;
+  if (n < 0 || n >= S.filtered.length) { if (delta > 0) toast("已经是筛选结果的最后一条"); return; }
+  S.cur = n;
+  if (resetField) S.activeField = firstChoiceIndex();
+  document.querySelectorAll(".item.active").forEach((e) => e.classList.remove("active"));
+  $("list").querySelector(`[data-i="${n}"]`)?.classList.add("active");
+  renderCase();
+}
+function nextTodo() {
+  for (let k = 1; k <= S.filtered.length; k++) {
+    const i = (S.cur + k) % S.filtered.length;
+    if (statusOf(S.filtered[i].id) !== "done") { go(i - S.cur, true); return; }
+  }
+  toast("筛选结果里都已完成 🎉");
+}
+function firstChoiceIndex() { const i = S.schema.findIndex((f) => f.type !== "text"); return i < 0 ? 0 : i; }
+
+// ---------------------------------------------------------------------------
+// 导入 / 导出
+// ---------------------------------------------------------------------------
+function exportRows() {
+  return S.records.map((r) => {
+    const lab = S.labels[r.id] || {};
+    const row = { case_id: r.id, LE: r.LE, CME: r.CME, ...r.meta };
+    for (const f of S.schema) row[f.name] = f.type === "multi" ? (lab[f.name] || []) : (lab[f.name] || "");
+    row.label_status = statusOf(r.id);
+    row.labeled_at = lab._t ? new Date(lab._t).toISOString() : "";
+    return row;
+  });
+}
+function download(name, text, type) {
+  const blob = new Blob([text], { type });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+function baseName() { return (S.fileName || "narratives").replace(/\.(json|jsonl)$/i, ""); }
+function stamp() { const d = new Date(), p = (x) => String(x).padStart(2, "0"); return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`; }
+
+function exportJson() {
+  download(`${baseName()}_labeled_${stamp()}.json`, JSON.stringify(exportRows(), null, 2), "application/json");
+}
+function exportCsv() {
+  const rows = exportRows();
+  const cols = Object.keys(rows[0] || {});
+  const cell = (v) => { v = Array.isArray(v) ? v.join("; ") : String(v ?? ""); return /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
+  const text = "﻿" + [cols.map(cell).join(",")].concat(rows.map((r) => cols.map((c) => cell(r[c])).join(","))).join("\r\n");
+  download(`${baseName()}_labeled_${stamp()}.csv`, text, "text/csv");
+}
+function importLabels(rows) {
+  let n = 0, miss = 0;
+  for (const row of rows) {
+    const id = row && row.case_id != null ? String(row.case_id) : null;
+    if (!id || !S.byId.has(id)) { miss++; continue; }
+    const lab = normalizeLabel({ ...row, _t: row.labeled_at ? Date.parse(row.labeled_at) || Date.now() : Date.now() });
+    if (S.schema.some((f) => isFilled(lab[f.name]))) { S.labels[id] = lab; n++; }
+  }
+  saveLabels();
+  applyFilters(true);
+  toast(`导入 ${n} 条标注` + (miss ? `，${miss} 条 case_id 不在当前文件里` : ""));
+}
+
+function readFile(file, cb) {
+  const fr = new FileReader();
+  fr.onload = () => { try { cb(fr.result); } catch (e) { alert("读取失败：" + e.message); } };
+  fr.onerror = () => alert("读取失败");
+  fr.readAsText(file, "utf-8");
+}
+function openFile(file) { readFile(file, (text) => loadRecords(parseData(text), file.name)); }
+
+// ---------------------------------------------------------------------------
+// 事件
+// ---------------------------------------------------------------------------
+$("btnOpen").onclick = () => $("fileInput").click();
+$("fileInput").onchange = (e) => { const f = e.target.files[0]; if (f) openFile(f); e.target.value = ""; };
+$("btnImport").onclick = () => $("importInput").click();
+$("importInput").onchange = (e) => { const f = e.target.files[0]; if (f) readFile(f, (t) => importLabels(parseData(t))); e.target.value = ""; };
+$("btnExportJson").onclick = exportJson;
+$("btnExportCsv").onclick = exportCsv;
+$("btnPrev").onclick = () => go(-1, true);
+$("btnNext").onclick = () => go(1, true);
+$("btnNextTodo").onclick = nextTodo;
+$("btnClear").onclick = () => {
+  const r = S.filtered[S.cur]; if (!r || !S.labels[r.id]) return;
+  if (!confirm(`清除 ${r.id} 的全部标注？`)) return;
+  delete S.labels[r.id]; saveLabels(); refreshListItem(S.cur); renderProgress(); renderLabelFields(); renderDist();
+};
+$("list").addEventListener("click", (e) => {
+  const b = e.target.closest(".item"); if (!b) return;
+  go(Number(b.dataset.i) - S.cur, true);
+});
+["q", "lenMin", "lenMax"].forEach((id) => $(id).addEventListener("input", debounce(() => applyFilters(), 200)));
+["qIn", "qRegex", "qNot", "fStatus", "fLE", "fCME", "sortBy"].forEach((id) => $(id).addEventListener("input", () => applyFilters()));
+$("distField").addEventListener("input", renderDist);
+$("btnReset").onclick = () => {
+  document.querySelectorAll("#filters input[type=text], #filters input[type=number]").forEach((e) => (e.value = ""));
+  document.querySelectorAll("#filters select:not(#distField):not(#sortBy)").forEach((e) => (e.selectedIndex = 0));
+  ["qRegex", "qNot"].forEach((id) => ($(id).checked = false));
+  applyFilters();
+};
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+const drop = $("drop");
+["dragenter", "dragover"].forEach((ev) => document.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((ev) => document.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+document.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) openFile(f); });
+
+document.addEventListener("keydown", (e) => {
+  if ($("schemaDlg").open) return;
+  const tag = (e.target.tagName || "").toLowerCase();
+  if (tag === "textarea" || (tag === "input" && e.target.type !== "checkbox")) {
+    if (e.key === "Escape") e.target.blur();
+    return;
+  }
+  if (tag === "select") return;
+  if (e.ctrlKey || e.metaKey || e.altKey || !S.records.length) return;
+  const k = e.key;
+  if (k === "j" || k === "J" || k === "ArrowRight") { go(1, true); e.preventDefault(); }
+  else if (k === "k" || k === "K" || k === "ArrowLeft") { go(-1, true); e.preventDefault(); }
+  else if (k === "n" || k === "N") { nextTodo(); e.preventDefault(); }
+  else if (k === "/") { $("q").focus(); e.preventDefault(); }
+  else if (k === "]" || k === "[") {
+    const n = S.schema.length; setActive((S.activeField + (k === "]" ? 1 : n - 1)) % n); e.preventDefault();
+    const f = S.schema[S.activeField]; if (f.type === "text") document.querySelector(`.lf[data-fi="${S.activeField}"] textarea`)?.focus();
+  }
+  else if (/^[1-9]$/.test(k)) { choose(S.activeField, Number(k) - 1); e.preventDefault(); }
+});
+
+// 字段编辑
+$("btnSchema").onclick = () => { $("schemaText").value = schemaToText(S.schema); $("schemaErr").textContent = ""; $("schemaDlg").showModal(); };
+$("schemaCancel").onclick = () => $("schemaDlg").close();
+$("schemaDefault").onclick = () => { $("schemaText").value = DEFAULT_SCHEMA_TEXT; };
+$("schemaSave").onclick = () => {
+  try {
+    const schema = parseSchema($("schemaText").value);
+    S.schema = schema;
+    lsSet("nvdrs-label:schema", schemaToText(schema));
+    S.activeField = firstChoiceIndex();
+    $("schemaDlg").close();
+    if (S.records.length) { buildFilterUI(); applyFilters(true); }
+    toast("标注字段已保存");
+  } catch (e) { $("schemaErr").textContent = e.message; }
+};
+
+// 明暗
+(function () {
+  const saved = lsGet("nvdrs-label:theme", "");
+  if (saved) document.documentElement.dataset.theme = saved;
+  $("btnTheme").onclick = () => {
+    const dark = document.documentElement.dataset.theme
+      ? document.documentElement.dataset.theme === "dark"
+      : matchMedia("(prefers-color-scheme: dark)").matches;
+    document.documentElement.dataset.theme = dark ? "light" : "dark";
+    lsSet("nvdrs-label:theme", document.documentElement.dataset.theme);
+  };
+})();
+
+window.addEventListener("beforeunload", () => { clearTimeout(saveTimer); if (S.records.length) lsSet(storeKey(), S.labels); });
+
+loadSchema();
+S.activeField = firstChoiceIndex();
+</script>
+</body>
+</html>

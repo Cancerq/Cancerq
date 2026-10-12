@@ -944,3 +944,17 @@ python narratives_to_json.py --input narratives.txt --output Json_folder \
 - 筛选永远只按 IncidentID 匹配，筛选表可以只有 IncidentID 一列
 - 叙述保留原文，只统一换行；LE、CME 都空的行丢掉（`--require-both` 要求两者都有）
 - 不足 500 条时全部放进抽样文件，并打印提示
+
+## 人工标注：`label_tool.html`
+
+单文件、离线的标注页面。双击用浏览器打开，再点「打开 JSON」读入
+`narratives_to_json.py` 生成的文件（全量或 `_sample_500` 都行）。
+**数据只在本机浏览器里读取，不上传。**
+
+- 筛选：关键词（多词同时包含 / 正则 / 排除，可只搜 LE 或 CME，命中词高亮）、
+  标注状态、LE/CME 是否为空、叙述字数，以及按已标的值筛选；
+  JSON 里除 case_id/LE/CME 以外的字段（如 Year、Age）会自动生成筛选条件
+- 标注字段可自定义（「标注字段」按钮）：单选、多选、文本
+- 快捷键：数字 1–9 选项，`[` `]` 切换字段，J/K 上下条，N 下一条未完成，`/` 搜索
+- 标注自动保存在本浏览器；「导出 JSON / CSV」备份（CSV 带 BOM，Excel 直接打开不乱码），
+  「导入标注」可在别的电脑或浏览器上接着标

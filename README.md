@@ -914,3 +914,27 @@ python to_pretrain_json.py --input a.csv --output pretrain.jsonl \
 - 空单元格不会变成 `nan`；`34.0` 写成 `34`；ID 前导 0 保留；中文不转义
 - CSV 编码自动识别（UTF-8 / GBK），大文件分块读
 - 也可以不用命令行：填好脚本顶部「配置区」后直接 `python to_pretrain_json.py`
+
+## 叙述文本转 `{case_id, LE, CME}` JSON：`narratives_to_json.py`
+
+把 NVDRS 叙述文本文件（.txt / .csv / .tsv，Tab、逗号、竖线分隔自动识别）
+整理成每个死者一条：
+
+```json
+[
+  {"case_id": "1001_1", "LE": "执法叙述原文", "CME": "验尸官/法医叙述原文"}
+]
+```
+
+```bash
+python narratives_to_json.py --input narratives.txt --output Json_folder
+# 只要建筑业案例：
+python narratives_to_json.py --input narratives.txt --output Json_folder \
+    --keep-ids construction_cases.csv
+```
+
+- `case_id` 自动识别：CaseID 一类的单独编号列 → `IncidentID_PersonID` → `IncidentID`；
+  用 `--id-cols` 或配置区 `CASE_ID_COLS` 指定
+- LE / CME 列自动识别（NarrativeLE、NarrativeCME 等），运行时会打印选中了哪几列
+- 叙述保留原文，只统一换行；LE、CME 都空的行丢掉（`--require-both` 要求两者都有）
+- 重复 case_id 只留第一条，明细写进 `duplicate_case_ids.csv`

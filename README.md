@@ -947,14 +947,27 @@ python narratives_to_json.py --input narratives.txt --output Json_folder \
 
 ## 人工标注：`label_tool.html`
 
-单文件、离线的标注页面。双击用浏览器打开，再点「打开 JSON」读入
+单文件、离线的证据标注页面。双击用浏览器打开，再点「打开 JSON」读入
 `narratives_to_json.py` 生成的文件（全量或 `_sample_500` 都行）。
 **数据只在本机浏览器里读取，不上传。**
 
-- 筛选：关键词（多词同时包含 / 正则 / 排除，可只搜 LE 或 CME，命中词高亮）、
-  标注状态、LE/CME 是否为空、叙述字数，以及按已标的值筛选；
-  JSON 里除 case_id/LE/CME 以外的字段（如 Year、Age）会自动生成筛选条件
-- 标注字段可自定义（「标注字段」按钮）：单选、多选、文本
-- 快捷键：数字 1–9 选项，`[` `]` 切换字段，J/K 上下条，N 下一条未完成，`/` 搜索
-- 标注自动保存在本浏览器；「导出 JSON / CSV」备份（CSV 带 BOM，Excel 直接打开不乱码），
-  「导入标注」可在别的电脑或浏览器上接着标
+每个案例按研究字段（默认 `job_problem`，提示词内置）标成：
+
+```json
+{"value": "yes", "evidence": [{"source": "LE", "quote": "原文中逐字连续的一段"}]}
+```
+
+- value：yes / no / unknown / conflict（快捷键 1–4）
+- evidence：在 LE / CME 原文里拖选文字，按 E 添加，引文保证与原文逐字一致；也可粘贴，会校验
+- 实时校验：unknown 必须没有证据；yes / no 至少 1 条；conflict 至少 2 条；引文必须在对应原文里
+- 筛选：关键词（可只搜 LE / CME / 已选证据，「工作相关词」一键正则）、状态、value、证据来源、
+  原文是否为空、字数，以及 JSON 里的其他字段
+- 「研究字段」里可改提示词或新增字段，各字段的标注分开保存
+
+导出：
+
+| 按钮 | 内容 |
+|---|---|
+| 导出标注 | 全部案例 + `{字段名: {value, evidence}}`，用于备份；可直接再「打开」或「导入」 |
+| 导出训练 JSONL | 只含校验通过的案例；每行 `{"messages": [system=提示词, user={case_id, LE, CME}, assistant={value, evidence}]}` |
+| 导出 CSV | 一案一行，证据按 LE / CME 分列，Excel 直接打开不乱码 |

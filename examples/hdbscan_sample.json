@@ -1,0 +1,508 @@
+{
+ "params": {
+  "min_cluster_size": 5,
+  "min_samples": 3,
+  "metric": "euclidean",
+  "cluster_selection_method": "eom",
+  "cluster_selection_epsilon": 0.0,
+  "embedding": "text2vec + UMAP(n_components=2)"
+ },
+ "points": [
+  {
+   "word": "水果",
+   "cluster": 0,
+   "probability": 1.0,
+   "outlier_score": 0.0,
+   "x": 6.0,
+   "y": 0.0
+  },
+  {
+   "word": "苹果",
+   "cluster": 0,
+   "probability": 0.56,
+   "outlier_score": 0.44,
+   "x": 6.822,
+   "y": 1.143
+  },
+  {
+   "word": "香蕉",
+   "cluster": 0,
+   "probability": 0.773,
+   "outlier_score": 0.227,
+   "x": 6.844,
+   "y": 0.413
+  },
+  {
+   "word": "橙子",
+   "cluster": 0,
+   "probability": 0.698,
+   "outlier_score": 0.302,
+   "x": 5.267,
+   "y": 0.826
+  },
+  {
+   "word": "葡萄",
+   "cluster": 0,
+   "probability": 0.388,
+   "outlier_score": 0.612,
+   "x": 4.215,
+   "y": -0.081
+  },
+  {
+   "word": "草莓",
+   "cluster": 0,
+   "probability": 0.374,
+   "outlier_score": 0.626,
+   "x": 4.339,
+   "y": 0.738
+  },
+  {
+   "word": "西瓜",
+   "cluster": 0,
+   "probability": 0.395,
+   "outlier_score": 0.605,
+   "x": 7.491,
+   "y": 0.955
+  },
+  {
+   "word": "芒果",
+   "cluster": 0,
+   "probability": 0.626,
+   "outlier_score": 0.374,
+   "x": 6.583,
+   "y": -1.12
+  },
+  {
+   "word": "菠萝",
+   "cluster": 0,
+   "probability": 0.43,
+   "outlier_score": 0.57,
+   "x": 6.285,
+   "y": 1.67
+  },
+  {
+   "word": "樱桃",
+   "cluster": 0,
+   "probability": 0.758,
+   "outlier_score": 0.242,
+   "x": 6.919,
+   "y": -0.317
+  },
+  {
+   "word": "柠檬",
+   "cluster": 0,
+   "probability": 0.725,
+   "outlier_score": 0.275,
+   "x": 5.168,
+   "y": 0.633
+  },
+  {
+   "word": "桃子",
+   "cluster": 0,
+   "probability": 0.985,
+   "outlier_score": 0.015,
+   "x": 6.453,
+   "y": 0.136
+  },
+  {
+   "word": "梨",
+   "cluster": 0,
+   "probability": 0.908,
+   "outlier_score": 0.092,
+   "x": 5.842,
+   "y": 0.623
+  },
+  {
+   "word": "交通",
+   "cluster": 1,
+   "probability": 1.0,
+   "outlier_score": 0.0,
+   "x": 1.605,
+   "y": 5.781
+  },
+  {
+   "word": "汽车",
+   "cluster": 1,
+   "probability": 0.444,
+   "outlier_score": 0.556,
+   "x": 2.834,
+   "y": 6.902
+  },
+  {
+   "word": "火车",
+   "cluster": 1,
+   "probability": 0.551,
+   "outlier_score": 0.449,
+   "x": 2.178,
+   "y": 4.474
+  },
+  {
+   "word": "飞机",
+   "cluster": 1,
+   "probability": 0.467,
+   "outlier_score": 0.533,
+   "x": 0.198,
+   "y": 4.993
+  },
+  {
+   "word": "地铁",
+   "cluster": 1,
+   "probability": 0.765,
+   "outlier_score": 0.235,
+   "x": 0.94,
+   "y": 6.47
+  },
+  {
+   "word": "公交",
+   "cluster": 1,
+   "probability": 0.706,
+   "outlier_score": 0.294,
+   "x": 2.608,
+   "y": 6.199
+  },
+  {
+   "word": "自行车",
+   "cluster": 1,
+   "probability": 0.389,
+   "outlier_score": 0.611,
+   "x": 2.094,
+   "y": 7.497
+  },
+  {
+   "word": "轮船",
+   "cluster": 1,
+   "probability": 0.792,
+   "outlier_score": 0.208,
+   "x": 0.799,
+   "y": 6.177
+  },
+  {
+   "word": "摩托车",
+   "cluster": 1,
+   "probability": 0.554,
+   "outlier_score": 0.446,
+   "x": 0.383,
+   "y": 5.056
+  },
+  {
+   "word": "高铁",
+   "cluster": 1,
+   "probability": 0.645,
+   "outlier_score": 0.355,
+   "x": 1.23,
+   "y": 6.943
+  },
+  {
+   "word": "出租车",
+   "cluster": 1,
+   "probability": 0.866,
+   "outlier_score": 0.134,
+   "x": 1.372,
+   "y": 5.084
+  },
+  {
+   "word": "天气",
+   "cluster": 2,
+   "probability": 1.0,
+   "outlier_score": 0.0,
+   "x": -5.141,
+   "y": 3.093
+  },
+  {
+   "word": "下雨",
+   "cluster": 2,
+   "probability": 0.509,
+   "outlier_score": 0.491,
+   "x": -6.5,
+   "y": 2.41
+  },
+  {
+   "word": "晴天",
+   "cluster": 2,
+   "probability": 0.691,
+   "outlier_score": 0.309,
+   "x": -4.351,
+   "y": 2.3
+  },
+  {
+   "word": "台风",
+   "cluster": 2,
+   "probability": 0.824,
+   "outlier_score": 0.176,
+   "x": -5.336,
+   "y": 3.897
+  },
+  {
+   "word": "雷电",
+   "cluster": 2,
+   "probability": 0.987,
+   "outlier_score": 0.013,
+   "x": -4.796,
+   "y": 3.409
+  },
+  {
+   "word": "降雪",
+   "cluster": 2,
+   "probability": 0.622,
+   "outlier_score": 0.378,
+   "x": -5.087,
+   "y": 1.823
+  },
+  {
+   "word": "雾霾",
+   "cluster": 2,
+   "probability": 0.449,
+   "outlier_score": 0.551,
+   "x": -6.789,
+   "y": 3.21
+  },
+  {
+   "word": "气温",
+   "cluster": 2,
+   "probability": 0.375,
+   "outlier_score": 0.625,
+   "x": -6.037,
+   "y": 1.514
+  },
+  {
+   "word": "湿度",
+   "cluster": 2,
+   "probability": 0.847,
+   "outlier_score": 0.153,
+   "x": -5.838,
+   "y": 2.75
+  },
+  {
+   "word": "编程",
+   "cluster": 3,
+   "probability": 1.0,
+   "outlier_score": 0.0,
+   "x": -4.356,
+   "y": -4.127
+  },
+  {
+   "word": "Python",
+   "cluster": 3,
+   "probability": 0.919,
+   "outlier_score": 0.081,
+   "x": -4.596,
+   "y": -3.557
+  },
+  {
+   "word": "JavaScript",
+   "cluster": 3,
+   "probability": 0.802,
+   "outlier_score": 0.198,
+   "x": -5.083,
+   "y": -4.615
+  },
+  {
+   "word": "编译器",
+   "cluster": 3,
+   "probability": 0.727,
+   "outlier_score": 0.273,
+   "x": -5.357,
+   "y": -3.842
+  },
+  {
+   "word": "函数",
+   "cluster": 3,
+   "probability": 0.896,
+   "outlier_score": 0.104,
+   "x": -3.727,
+   "y": -4.356
+  },
+  {
+   "word": "变量",
+   "cluster": 3,
+   "probability": 0.658,
+   "outlier_score": 0.342,
+   "x": -4.97,
+   "y": -5.148
+  },
+  {
+   "word": "数据库",
+   "cluster": 3,
+   "probability": 0.389,
+   "outlier_score": 0.611,
+   "x": -4.895,
+   "y": -5.827
+  },
+  {
+   "word": "算法",
+   "cluster": 3,
+   "probability": 0.771,
+   "outlier_score": 0.229,
+   "x": -3.413,
+   "y": -4.171
+  },
+  {
+   "word": "接口",
+   "cluster": 3,
+   "probability": 0.884,
+   "outlier_score": 0.116,
+   "x": -4.505,
+   "y": -3.448
+  },
+  {
+   "word": "调试",
+   "cluster": 3,
+   "probability": 0.601,
+   "outlier_score": 0.399,
+   "x": -5.003,
+   "y": -5.275
+  },
+  {
+   "word": "框架",
+   "cluster": 3,
+   "probability": 0.365,
+   "outlier_score": 0.635,
+   "x": -6.139,
+   "y": -3.686
+  },
+  {
+   "word": "服务器",
+   "cluster": 3,
+   "probability": 0.459,
+   "outlier_score": 0.541,
+   "x": -3.147,
+   "y": -3.033
+  },
+  {
+   "word": "缓存",
+   "cluster": 3,
+   "probability": 0.388,
+   "outlier_score": 0.612,
+   "x": -4.156,
+   "y": -5.902
+  },
+  {
+   "word": "线程",
+   "cluster": 3,
+   "probability": 0.434,
+   "outlier_score": 0.566,
+   "x": -4.329,
+   "y": -2.442
+  },
+  {
+   "word": "内存",
+   "cluster": 3,
+   "probability": 0.604,
+   "outlier_score": 0.396,
+   "x": -3.452,
+   "y": -5.077
+  },
+  {
+   "word": "运动",
+   "cluster": 4,
+   "probability": 1.0,
+   "outlier_score": 0.0,
+   "x": 2.811,
+   "y": -5.301
+  },
+  {
+   "word": "足球",
+   "cluster": 4,
+   "probability": 0.402,
+   "outlier_score": 0.598,
+   "x": 1.145,
+   "y": -4.747
+  },
+  {
+   "word": "篮球",
+   "cluster": 4,
+   "probability": 0.707,
+   "outlier_score": 0.293,
+   "x": 3.615,
+   "y": -6.028
+  },
+  {
+   "word": "游泳",
+   "cluster": 4,
+   "probability": 0.883,
+   "outlier_score": 0.117,
+   "x": 3.268,
+   "y": -5.828
+  },
+  {
+   "word": "跑步",
+   "cluster": 4,
+   "probability": 0.531,
+   "outlier_score": 0.469,
+   "x": 1.544,
+   "y": -4.552
+  },
+  {
+   "word": "网球",
+   "cluster": 4,
+   "probability": 0.583,
+   "outlier_score": 0.417,
+   "x": 3.822,
+   "y": -6.206
+  },
+  {
+   "word": "羽毛球",
+   "cluster": 4,
+   "probability": 0.973,
+   "outlier_score": 0.027,
+   "x": 3.102,
+   "y": -4.895
+  },
+  {
+   "word": "今天",
+   "cluster": -1,
+   "probability": 0.0,
+   "outlier_score": 0.835,
+   "x": -4.825,
+   "y": -4.8
+  },
+  {
+   "word": "东西",
+   "cluster": -1,
+   "probability": 0.0,
+   "outlier_score": 0.897,
+   "x": 1.604,
+   "y": -4.271
+  },
+  {
+   "word": "然后",
+   "cluster": -1,
+   "probability": 0.0,
+   "outlier_score": 0.801,
+   "x": -1.459,
+   "y": -2.353
+  },
+  {
+   "word": "可能",
+   "cluster": -1,
+   "probability": 0.0,
+   "outlier_score": 0.913,
+   "x": 8.156,
+   "y": 3.429
+  },
+  {
+   "word": "其实",
+   "cluster": -1,
+   "probability": 0.0,
+   "outlier_score": 0.903,
+   "x": 2.117,
+   "y": 3.172
+  },
+  {
+   "word": "一些",
+   "cluster": -1,
+   "probability": 0.0,
+   "outlier_score": 0.811,
+   "x": 7.192,
+   "y": 5.039
+  },
+  {
+   "word": "问题",
+   "cluster": -1,
+   "probability": 0.0,
+   "outlier_score": 0.975,
+   "x": 5.362,
+   "y": -1.937
+  }
+ ]
+}

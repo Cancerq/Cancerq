@@ -832,6 +832,43 @@ python verify_circumstance.py --input out/labeled/ --output-dir report/
 | `--mismatches-only` | 只打印有问题的批次 |
 | `--output-dir` | 输出 `circumstance_mismatches.csv` 和 `circumstance_value_pairs.csv` |
 
+## HDBSCAN 聚类可视化：`visualize_hdbscan.py`
+
+把 HDBSCAN 的聚类结果（JSON / JSONL / CSV / TSV）画成**一个独立的 HTML 页面**，
+双击即可在浏览器打开，不联网、不需要 pandas / matplotlib。
+
+```bash
+python visualize_hdbscan.py examples/hdbscan_sample.json --open
+python visualize_hdbscan.py result.csv -o clusters.html --param min_cluster_size=10 --param min_samples=5
+```
+
+页面：
+
+- **左栏**：输入文件信息（文件名、格式、行数、识别出的列）、HDBSCAN 参数、统计
+  （簇数 / 点数 / 噪声比例 / 簇大小范围）、簇列表（颜色 + 中心词 + 大小，点击定位并淡化其它簇，
+  Alt+点击 隐藏）、搜索框。
+- **画布**：每个簇一种颜色，**簇中心词在圆心，其余词围一圈并用线连到中心**；有 probability 时
+  越属于该簇的词离中心越近、连线越实。噪声（label = -1）灰色单独一块、不连线。
+  数据有 x / y 坐标时可切换到“原始坐标”布局。滚轮缩放、拖动平移、悬停看概率等详情，
+  可导出 SVG / PNG，自动跟随系统深色模式。
+
+输入格式（列名不区分大小写，识别不了时用 `--word-col` / `--cluster-col` / `--prob-col` /
+`--x-col` / `--y-col` / `--center-col` 指定）：
+
+| 形式 | 例子 |
+|---|---|
+| 一行一个词（CSV / TSV / JSONL / JSON 列表） | `word,cluster,probability,x,y` |
+| JSON 并列数组 | `{"words":[...], "labels":[...], "probabilities":[...], "params":{...}}` |
+| JSON 按簇组织 | `{"params":{...}, "clusters":[{"id":0,"center":"水果","members":["苹果",...]}], "noise":[...]}` |
+| JSON 包一层 | `{"params":{...}, "points":[{"word":...,"cluster":...}, ...]}` |
+
+参数来源（后者覆盖前者）：JSON 的 `params` / `parameters` 字段 → CSV 开头注释行
+（`# min_cluster_size = 10`）→ `--params params.json` → `--param k=v`。
+
+簇中心：`is_center` 为真的词 → probability 最高的词（并列时取离质心最近的）→ 簇内第一个词。
+簇很大时可用 `--max-members N` 每簇只画概率最高的 N 个词（簇大小仍按真实值显示）。
+CSV 支持 UTF-8 和 GBK 编码。
+
 ## 测试
 
 用合成数据（不含任何真实 NVDRS 记录）做端到端校验：
@@ -849,6 +886,7 @@ python tests/test_run_electrician_split.py
 python tests/test_split_by_year.py
 python tests/test_run_electrician_by_year.py
 python tests/test_run_electrician_pipeline.py
+python tests/test_visualize_hdbscan.py
 ```
 
 `test_nvdrs_split.py` 覆盖：编码路径与关键词路径的分类正确性、`Yes/No/Unknown/空`

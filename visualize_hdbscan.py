@@ -824,34 +824,63 @@ const DATA = __DATA__;
   }
 
   // ---------- layouts: each returns {clusters:[{cx,cy,R,title:{x,y},center:{x,y},members:[{x,y,a}]}], noise:[{x,y}], box}
+  // Horizontal label placed outside its dot: right side -> left-aligned, left side -> right-aligned,
+  // near the top/bottom -> centered above/below. Returns the text anchor point and its box.
+  const LABEL_H = 14;
+  function labelBox(x, y, a, w) {
+    const c = Math.cos(a), sn = Math.sin(a);
+    if (c > 0.3) return { anchor: "start", tx: x + 7, ty: y, x0: x + 5, x1: x + 9 + w, y0: y - LABEL_H / 2, y1: y + LABEL_H / 2 };
+    if (c < -0.3) return { anchor: "end", tx: x - 7, ty: y, x0: x - 9 - w, x1: x - 5, y0: y - LABEL_H / 2, y1: y + LABEL_H / 2 };
+    const ty = sn < 0 ? y - 11 : y + 11;
+    return { anchor: "middle", tx: x, ty, x0: x - w / 2 - 2, x1: x + w / 2 + 2, y0: ty - LABEL_H / 2, y1: ty + LABEL_H / 2 };
+  }
+  const overlap = (p, q) => p.x0 < q.x1 && q.x0 < p.x1 && p.y0 < q.y1 && q.y0 < p.y1;
+  function ring(c, R) {
+    const n = c.members.length;
+    return c.members.map((m, j) => {
+      const a = -Math.PI / 2 + (2 * Math.PI * j) / n;
+      const p = m.prob == null ? 1 : Math.max(0, Math.min(1, m.prob));
+      const r = M.has_prob ? R * (INNER + (1 - INNER) * (1 - p)) : R;
+      const x = r * Math.cos(a), y = r * Math.sin(a);
+      return { x, y, a, box: labelBox(x, y, a, textW(clip(m.word))) };
+    });
+  }
+  function ringFits(pts) {
+    const n = pts.length, cBox = { x0: -45, x1: 45, y0: -12, y1: 34 };  // keep clear of the center dot and its label
+    for (let j = 0; j < n; j++) {
+      if (overlap(pts[j].box, cBox)) return false;
+      for (let k = 1; k <= Math.min(3, n - 1); k++) if (overlap(pts[j].box, pts[(j + k) % n].box)) return false;
+    }
+    return true;
+  }
   function radialLayout() {
     const shapes = CL.map((c) => {
       const n = c.members.length;
-      const R = n ? Math.max(70, (n * SPACING) / (2 * Math.PI * INNER)) : 0;
-      const lab = n ? Math.min(170, Math.max(...c.members.map((m) => textW(clip(m.word))))) : 0;
-      const foot = Math.max(R + lab + 18, textW(clip(c.center.word, 18)) / 2 + 30, 60);
-      return { R, foot, n };
+      let R = n ? Math.max(80, (n * LABEL_H * 1.1) / (2 * Math.PI * (M.has_prob ? INNER : 1))) : 0, pts = [];
+      for (let it = 0; it < 60 && n; it++) { pts = ring(c, R); if (ringFits(pts)) break; R *= 1.08; }
+      let top = -30, foot = Math.max(60, textW(clip(c.center.word, 18)) / 2 + 20);
+      pts.forEach((p) => {
+        const b = p.box;
+        top = Math.min(top, b.y0, p.y - 5);
+        foot = Math.max(foot, Math.hypot(Math.max(Math.abs(b.x0), Math.abs(b.x1)), Math.max(Math.abs(b.y0), Math.abs(b.y1))) + 12);
+      });
+      return { pts, foot, top };
     });
     const order = CL.map((_, i) => i).sort((a, b) => shapes[b].foot - shapes[a].foot);
-    const area = shapes.reduce((s, sh) => s + (2 * sh.foot + 40) ** 2, 0);
-    const rowW = Math.max(shapes.length ? 2 * shapes[order[0]].foot + 40 : 600, Math.sqrt(area) * 1.5, 600);
+    const area = shapes.reduce((s, sh) => s + (2 * sh.foot + 30) ** 2, 0);
+    const rowW = Math.max(shapes.length ? 2 * shapes[order[0]].foot + 30 : 600, Math.sqrt(area) * 1.5, 600);
     const pos = new Array(CL.length);
     let x = 0, y = 0, rowH = 0;
     for (const i of order) {
-      const d = 2 * shapes[i].foot + 40;
+      const d = 2 * shapes[i].foot + 30;
       if (x > 0 && x + d > rowW) { x = 0; y += rowH; rowH = 0; }
       pos[i] = { cx: x + d / 2, cy: y + d / 2 + 14 };
       x += d; rowH = Math.max(rowH, d + 14);
     }
     const clusters = CL.map((c, i) => {
-      const { cx, cy } = pos[i], { R, n, foot } = shapes[i];
-      const members = c.members.map((m, j) => {
-        const a = -Math.PI / 2 + (2 * Math.PI * j) / n;
-        const p = m.prob == null ? 1 : Math.max(0, Math.min(1, m.prob));
-        const r = M.has_prob ? R * (INNER + (1 - INNER) * (1 - p)) : R;
-        return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a), a };
-      });
-      return { cx, cy, foot, center: { x: cx, y: cy }, title: { x: cx, y: cy - foot + 4 }, members };
+      const { cx, cy } = pos[i], { pts, foot, top } = shapes[i];
+      const members = pts.map((p) => ({ x: cx + p.x, y: cy + p.y, a: p.a }));
+      return { cx, cy, foot, center: { x: cx, y: cy }, title: { x: cx, y: cy + top - 12 }, members };
     });
     // noise block below
     const noise = [];
@@ -934,7 +963,6 @@ const DATA = __DATA__;
       if (state.hidden.has(i)) return;
       const c = CL[i], col = colorOf(i);
       const grp = el("g", { class: "cluster" + (state.focus != null && state.focus !== i ? " dim" : "") }, vp);
-      if (radial) el("circle", { "data-drag": "c" + i, cx: g.cx, cy: g.cy, r: g.foot - 10, fill: col, "fill-opacity": 0.04, stroke: col, "stroke-opacity": 0.25, "stroke-dasharray": "3 4" }, grp);
       // spokes
       const lines = el("g", {}, grp);
       c.members.forEach((m, j) => {
@@ -949,10 +977,9 @@ const DATA = __DATA__;
         el("circle", { class: "node", cx: p.x, cy: p.y, r: 4, fill: col, stroke: halo, "stroke-width": 1.5 }, ng);
         const label = clip(m.word);
         if (radial) {
-          let deg = (p.a * 180) / Math.PI, flip = Math.cos(p.a) < 0;
-          if (flip) deg += 180;
-          el("text", { class: "ml", x: p.x, y: p.y, dy: "0.35em", dx: flip ? -8 : 8, "text-anchor": flip ? "end" : "start",
-            transform: `rotate(${deg.toFixed(2)} ${p.x.toFixed(2)} ${p.y.toFixed(2)})`, fill: ink2, "font-size": FONT }, ng).textContent = label;
+          const b = labelBox(p.x, p.y, p.a, textW(label));
+          el("text", { class: "ml", x: b.tx, y: b.ty, dy: "0.35em", "text-anchor": b.anchor, fill: ink2, "font-size": FONT,
+            stroke: halo, "stroke-width": 3, "paint-order": "stroke", "stroke-linejoin": "round" }, ng).textContent = label;
         } else {
           el("text", { class: "ml", x: p.x + 6, y: p.y, dy: "0.35em", fill: ink2, "font-size": FONT - 1 }, ng).textContent = label;
         }

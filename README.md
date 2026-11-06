@@ -849,7 +849,9 @@ python visualize_hdbscan.py result.csv -o clusters.html --param min_cluster_size
   Alt+点击 隐藏）、搜索框。
 - **画布**：每个簇一种颜色，**簇中心词在圆心，其余词围一圈并用线连到中心**；有 probability 时
   越属于该簇的词离中心越近、连线越实。噪声（label = -1）灰色单独一块、不连线。
-  数据有 x / y 坐标时可切换到“原始坐标”布局。滚轮缩放、拖动平移、悬停看概率等详情，
+  数据有 x / y 坐标时可切换到“原始坐标”布局。**可以拖动**：拖动单个词移动这个词（连线跟着走），
+  拖动簇中心或簇标题移动整个簇，拖动空白处平移，“复位”按钮放回原位；导出时保留拖动后的位置。
+  滚轮缩放、悬停看概率等详情，
   可导出 SVG / PNG，自动跟随系统深色模式。
 
 输入格式（列名不区分大小写，识别不了时用 `--word-col` / `--cluster-col` / `--prob-col` /
@@ -861,6 +863,11 @@ python visualize_hdbscan.py result.csv -o clusters.html --param min_cluster_size
 | JSON 并列数组 | `{"words":[...], "labels":[...], "probabilities":[...], "params":{...}}` |
 | JSON 按簇组织 | `{"params":{...}, "clusters":[{"id":0,"center":"水果","members":["苹果",...]}], "noise":[...]}` |
 | JSON 包一层 | `{"params":{...}, "points":[{"word":...,"cluster":...}, ...]}` |
+| **汇总表**（每行一个簇） | `hdbscan_label,cluster_id,term_count,mean_membership_strength,frequent_term_preview` |
+
+汇总表会被自动识别（有词列表列如 `frequent_term_preview` / `top_terms` / `keywords`，且没有单独的词列时）：
+每行一个簇，词列表里**第一个词作为中心**，其余词围在外圈；簇大小取 `term_count`，未列出的词在标题里
+显示为“省略 N”。词列表可以用 `;` `,` `|` `、` 分隔，也可以是 `['a', 'b']`，`词 (12)` 里的数字会显示在悬停提示里。
 
 参数来源（后者覆盖前者）：JSON 的 `params` / `parameters` 字段 → CSV 开头注释行
 （`# min_cluster_size = 10`）→ `--params params.json` → `--param k=v`。

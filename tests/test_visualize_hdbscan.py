@@ -151,6 +151,36 @@ def main() -> int:
               "truncation recorded")
         check(ds["clusters"][0]["size"] == 3, "size still the real size")
 
+        print("\n-- summary table: one row per cluster --")
+        summ = work / "cluster_summary.csv"
+        summ.write_text(
+            "hdbscan_label,cluster_id,term_count,mean_membership_strength,frequent_term_preview\n"
+            "-1,noise,50,0.0,a; b\n"
+            "1,C1,30,0.84,\"pills, overdose, opioid\"\n"
+            "0,C0,42,0.91,gun; rifle; pistol; bullet\n"
+            "2,C2,18,0.77,rope (12); hanging (9)\n"
+            "3,C3,25,0.88,\"['argument', 'divorce']\"\n",
+            encoding="utf-8",
+        )
+        ds = build(summ)
+        check(ds["meta"].get("mode") == "summary", "summary mode detected")
+        check(ds["meta"]["mapping"]["簇标签"] == "hdbscan_label", "hdbscan_label preferred over cluster_id")
+        check([c["id"] for c in ds["clusters"]] == [0, 1, 2, 3], "clusters sorted, -1 excluded")
+        c0 = ds["clusters"][0]
+        check(c0["center"]["word"] == "gun" and [m["word"] for m in c0["members"]] == ["rifle", "pistol", "bullet"],
+              "first preview term is the center, rest are members")
+        check(c0["size"] == 42 and c0["truncated"] == 38, "size from term_count, rest counted as omitted")
+        check(c0["mean_prob"] == 0.91, "mean membership read")
+        check(c0["info"].get("cluster_id") == "C0", "other columns kept for the tooltip")
+        check([m["word"] for m in ds["clusters"][1]["members"]] == ["overdose", "opioid"], "comma separated")
+        c2 = ds["clusters"][2]
+        check(c2["center"]["word"] == "rope" and c2["center"]["extra"]["数值"] == 12, "'term (n)' split into term and number")
+        check(ds["clusters"][3]["members"][0]["word"] == "divorce", "python list literal parsed")
+        check(ds["stats"]["n_noise"] == 50 and ds["stats"]["n_points"] == 165, "noise and totals from term_count")
+        check([p["word"] for p in ds["noise"]] == ["a", "b"], "noise preview terms kept")
+        check(vh.split_terms("x | y ; z") == [("x", None), ("y", None), ("z", None)], "mixed separators")
+        check(vh.split_terms("") == [] and vh.split_terms(None) == [], "empty preview")
+
         print("\n-- CLI end to end --")
         out = work / "page.html"
         log = run([str(csv_path), "-o", str(out), "--param", "min_cluster_size=8",

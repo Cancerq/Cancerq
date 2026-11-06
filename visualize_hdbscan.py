@@ -42,6 +42,7 @@ import datetime as _dt
 import io
 import json
 import math
+import re
 import sys
 import webbrowser
 from pathlib import Path
@@ -51,7 +52,7 @@ from typing import Any
 
 WORD_KEYS = ["word", "words", "text", "texts", "token", "term", "keyword",
              "name", "title", "doc", "document", "sentence", "item", "词", "词语", "文本"]
-CLUSTER_KEYS = ["cluster", "clusters", "cluster_id", "clusterid", "label", "labels",
+CLUSTER_KEYS = ["hdbscan_label", "hdbscan_cluster", "cluster", "clusters", "cluster_id", "clusterid", "label", "labels",
                 "labels_", "cluster_label", "topic", "group", "簇", "类别", "聚类"]
 PROB_KEYS = ["probability", "probabilities", "probabilities_", "prob", "probs",
              "membership", "membership_probability", "strength", "confidence", "概率"]
@@ -62,6 +63,15 @@ Y_KEYS = ["y", "umap_y", "umap_2", "umap2", "tsne_y", "tsne_2", "pca_y", "pc2",
           "dim_1", "dim2", "component_2", "y_coord"]
 CENTER_KEYS = ["is_center", "center", "is_centre", "centre", "exemplar",
                "is_exemplar", "medoid", "is_medoid", "中心"]
+
+# 汇总表（每行一个簇）用到的列
+TERMS_LIST_KEYS = ["frequent_term_preview", "term_preview", "top_terms", "frequent_terms",
+                   "representative_terms", "top_words", "top_keywords", "keywords", "terms",
+                   "members", "preview", "关键词", "高频词"]
+SIZE_KEYS = ["term_count", "size", "cluster_size", "n_terms", "count", "n", "n_members",
+             "num_terms", "簇大小", "数量"]
+MEAN_PROB_KEYS = ["mean_membership_strength", "mean_probability", "mean_prob",
+                  "avg_probability", "mean_strength", "平均概率"]
 
 PARAM_KEYS = ["params", "parameters", "hdbscan_params", "hdbscan", "config", "settings", "args"]
 RECORD_KEYS = ["points", "data", "records", "items", "rows", "results", "words_info"]
@@ -285,6 +295,10 @@ def build_dataset(records: list[dict], params: dict, *, source: Path, fmt: str,
     if kc is None:
         raise SystemExit(f"错误：找不到簇标签列（如 cluster / label），现有列：{', '.join(keys)}；"
                          "可用 --cluster-col 指定")
+    kterms = _find_key(keys, TERMS_LIST_KEYS)
+    if kterms is not None and _find_key(keys, WORD_KEYS, word_col) is None:
+        return build_summary_dataset(records, params, source=source, fmt=fmt, keys=keys,
+                                     kc=kc, kterms=kterms, max_members=max_members)
     kw = _find_key(keys, WORD_KEYS, word_col)
     kp = _find_key(keys, PROB_KEYS, prob_col)
     ko = _find_key(keys, OUTLIER_KEYS)
@@ -367,6 +381,134 @@ def build_dataset(records: list[dict], params: dict, *, source: Path, fmt: str,
             "mapping": mapping,
             "has_xy": has_xy,
             "has_prob": has_prob,
+            "generated": _dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
+        },
+        "params": params,
+        "stats": stats,
+        "clusters": clusters,
+        "noise": noise,
+    }
+
+
+_TERM_WEIGHT = re.compile(r"^(.*?)\s*(?:[\(\[（]\s*([-+\d.eE]+)\s*[\)\]）]|[:：=]\s*([-+\d.eE]+))$")
+
+
+def split_terms(value: Any) -> list[tuple[str, float | None]]:
+    """把 "a; b; c" / "a, b" / "a (12), b (9)" / '["a","b"]' 拆成 [(词, 数值或 None)]。"""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        parts = [str(v) for v in value]
+    else:
+        s = str(value).strip()
+        if not s:
+            return []
+        parts = None
+        if s.startswith("["):
+            try:
+                loaded = json.loads(s)
+                if isinstance(loaded, list):
+                    parts = [str(v) for v in loaded]
+            except ValueError:
+                try:
+                    import ast
+                    loaded = ast.literal_eval(s)
+                    if isinstance(loaded, (list, tuple)):
+                        parts = [str(v) for v in loaded]
+                except (ValueError, SyntaxError):
+                    s = s.strip("[]")
+        if parts is None:
+            for seps in (r"[|;；\n、]", r"[,，]"):
+                if re.search(seps, s):
+                    parts = re.split(seps, s)
+                    break
+            else:
+                parts = [s]
+    out: list[tuple[str, float | None]] = []
+    for raw in parts:
+        t = raw.strip().strip("'\"").strip()
+        if not t or t in ("...", "…"):
+            continue
+        m = _TERM_WEIGHT.match(t)
+        if m and m.group(1).strip():
+            out.append((m.group(1).strip().strip("'\""), _to_float(m.group(2) or m.group(3))))
+        else:
+            out.append((t, None))
+    return out
+
+
+def build_summary_dataset(records: list[dict], params: dict, *, source: Path, fmt: str,
+                          keys: list[str], kc: str, kterms: str, max_members: int = 0) -> dict:
+    """汇总表：每行一个簇，词列表在一列里。第一个词当中心（通常是最常见的词）。"""
+    ksize = _find_key(keys, SIZE_KEYS)
+    kmean = _find_key(keys, MEAN_PROB_KEYS)
+    other_cols = [k for k in keys if k not in {kc, kterms, ksize, kmean}]
+
+    clusters = []
+    noise: list[dict] = []
+    noise_size = 0
+    for r in records:
+        cid = _cluster_id(r.get(kc))
+        terms = split_terms(r.get(kterms))
+        size = _to_float(r.get(ksize)) if ksize else None
+        size = int(size) if size is not None else len(terms)
+        pts = []
+        for rank, (word, weight) in enumerate(terms, 1):
+            extra = {"预览排名": rank}
+            if weight is not None:
+                extra["数值"] = weight
+            pts.append({"word": word, "cluster": cid, "prob": None, "outlier": None,
+                        "x": None, "y": None, "center": rank == 1, "extra": extra})
+        if cid is None:
+            noise.extend(pts)
+            noise_size += size
+            continue
+        if not pts:
+            pts = [{"word": f"簇 {r.get(kc)}", "cluster": cid, "prob": None, "outlier": None,
+                    "x": None, "y": None, "center": True}]
+        center, members = pts[0], pts[1:]
+        shown = len(members)
+        if max_members and shown > max_members:
+            members = members[:max_members]
+        info = {k: r.get(k) for k in other_cols if r.get(k) not in (None, "")}
+        clusters.append({
+            "id": cid,
+            "size": size,
+            "center": center,
+            "members": members,
+            "truncated": max(0, size - 1 - len(members)),
+            "mean_prob": _to_float(r.get(kmean)) if kmean else None,
+            "info": info,
+        })
+
+    def sort_key(c: dict) -> tuple:
+        return (0, c["id"], "") if isinstance(c["id"], int) else (1, 0, str(c["id"]))
+
+    clusters.sort(key=sort_key)
+    n = sum(c["size"] for c in clusters) + noise_size
+    stats = {
+        "n_points": n,
+        "n_clusters": len(clusters),
+        "n_noise": noise_size,
+        "noise_ratio": round(noise_size / n, 4) if n else 0,
+        "largest": max((c["size"] for c in clusters), default=0),
+        "smallest": min((c["size"] for c in clusters), default=0),
+    }
+    mapping = {"簇标签": kc, "词列表": kterms, "簇大小": ksize or "（按词列表长度）",
+               "平均隶属度": kmean or "—"}
+    return {
+        "meta": {
+            "file": source.name,
+            "path": str(source),
+            "format": fmt,
+            "rows": len(records),
+            "columns": keys,
+            "mapping": mapping,
+            "has_xy": False,
+            "has_prob": False,
+            "mode": "summary",
+            "note": f"汇总表模式：每行一个簇，只画“{kterms}”里列出的词；"
+                    "中心是列表里的第一个词，簇大小来自汇总表。",
             "generated": _dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
         },
         "params": params,
@@ -519,6 +661,8 @@ table.kv td { padding: 3px 0; border-bottom: 1px solid var(--border); vertical-a
 table.kv td:first-child { color: var(--ink-2); padding-right: 10px; white-space: nowrap; }
 table.kv td:last-child { text-align: right; font-variant-numeric: tabular-nums; word-break: break-all; }
 .empty { color: var(--muted); font-size: 12px; }
+table.kv td.empty { white-space: normal; text-align: left; word-break: break-word; }
+svg#canvas [data-drag] { cursor: move; }
 .controls { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
 .controls label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
 input[type=search] { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--page); color: var(--ink); font: inherit; }
@@ -591,11 +735,12 @@ svg#canvas.drag { cursor: grabbing; }
   <main>
     <svg id="canvas" xmlns="http://www.w3.org/2000/svg"><g id="vp"></g></svg>
     <div class="toolbar">
+      <button id="reset" title="把拖动过的词和簇放回原位">复位</button>
       <button id="fit" title="适应窗口">适应窗口</button>
       <button id="svgBtn" title="导出 SVG">导出 SVG</button>
       <button id="pngBtn" title="导出 PNG">导出 PNG</button>
     </div>
-    <div class="hint">滚轮缩放 · 拖动平移 · 悬停查看详情</div>
+    <div class="hint">拖动空白处平移 · 拖动词移动单个词 · 拖动簇中心或簇标题移动整个簇 · 滚轮缩放 · 悬停查看详情</div>
     <div id="tip"></div>
   </main>
 </div>
@@ -640,6 +785,7 @@ const DATA = __DATA__;
   const fileRows = [["文件名", M.file], ["格式", M.format], ["行数", M.rows], ["列数", M.columns.length]]
     .concat(Object.entries(M.mapping).map(([k, v]) => [k + "列", v]));
   $("fileinfo").innerHTML = fileRows.map(([k, v]) => `<tr><td>${esc(k)}</td><td title="${esc(v)}">${esc(fmt(v))}</td></tr>`).join("");
+  if (M.note) { const d = document.createElement("div"); d.className = "sub"; d.style.margin = "6px 0 0"; d.textContent = M.note; $("fileinfo").after(d); }
   const pEntries = Object.entries(DATA.params || {});
   $("params").innerHTML = pEntries.length
     ? pEntries.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(typeof v === "object" && v !== null ? JSON.stringify(v) : fmt(v))}</td></tr>`).join("")
@@ -655,7 +801,7 @@ const DATA = __DATA__;
     CL.forEach((c, i) => {
       const li = document.createElement("li");
       li.className = (state.focus === i ? "on" : "") + (state.hidden.has(i) ? " off" : "");
-      const meanP = c.mean_prob == null ? "" : ` · 均概率 ${(+c.mean_prob).toFixed(2)}`;
+      const meanP = c.mean_prob == null ? "" : ` · ${M.mode === "summary" ? "平均隶属度" : "均概率"} ${(+c.mean_prob).toFixed(2)}`;
       li.title = `簇 ${c.id}：中心「${c.center.word}」，${c.size} 个词${meanP}${c.truncated ? `（图中省略 ${c.truncated} 个）` : ""}\n点击定位；Alt/⌥+点击 显示/隐藏`;
       li.innerHTML = `<span class="sw" style="background:${colorOf(i)}"></span>
         <span class="name"><b>簇 ${esc(c.id)}</b> · ${esc(clip(c.center.word, 18))}
@@ -670,7 +816,7 @@ const DATA = __DATA__;
     if (NOISE.length) {
       const li = document.createElement("li");
       li.className = state.noise ? "" : "off";
-      li.innerHTML = `<span class="sw" style="background:${css("--noise")}"></span><span class="name"><b>噪声</b> · label = -1</span><span class="n">${NOISE.length}</span>`;
+      li.innerHTML = `<span class="sw" style="background:${css("--noise")}"></span><span class="name"><b>噪声</b> · label = -1</span><span class="n">${S.n_noise}</span>`;
       li.onclick = () => { state.noise = !state.noise; $("showNoise").checked = state.noise; render(); };
       ul.appendChild(li);
     }
@@ -747,12 +893,38 @@ const DATA = __DATA__;
     return { x0: x0 - pad, y0: y0 - pad - 20, x1: x1 + pad, y1: y1 + pad };
   }
 
+  // ---------- dragging nodes: offsets per layout, keyed c<i> (whole cluster), m<i>:<j> (one word), n<j> (noise)
+  const offsets = { radial: {}, coords: {} };
+  const off = (key) => offsets[state.layout][key] || { dx: 0, dy: 0 };
+  function applyOffsets(L) {
+    L.clusters.forEach((g, i) => {
+      const o = off("c" + i);
+      if (o.dx || o.dy) {
+        g.cx += o.dx; g.cy += o.dy;
+        g.center = { x: g.center.x + o.dx, y: g.center.y + o.dy };
+        g.title = { x: g.title.x + o.dx, y: g.title.y + o.dy };
+        g.members = g.members.map((p) => ({ x: p.x + o.dx, y: p.y + o.dy, a: p.a }));
+      }
+      g.members = g.members.map((p, j) => {
+        const m = off(`m${i}:${j}`);
+        if (!m.dx && !m.dy) return p;
+        const q = { x: p.x + m.dx, y: p.y + m.dy };
+        q.a = Math.atan2(q.y - g.center.y, q.x - g.center.x);  // label keeps pointing away from the center
+        return q;
+      });
+    });
+    L.noise.forEach((p, j) => { const o = off("n" + j); p.x += o.dx; p.y += o.dy; });
+  }
+  let raf = 0;
+  const renderSoon = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; render(); }); };
+
   // ---------- render
   function render() {
     buildLegend();
     vp.innerHTML = "";
     nodes = [];
     const L = state.layout === "coords" ? coordsLayout() : radialLayout();
+    applyOffsets(L);
     const ink = css("--ink"), ink2 = css("--ink-2"), halo = css("--halo"), muted = css("--muted"), noiseC = css("--noise");
     const q = state.query.trim().toLowerCase();
     const radial = state.layout === "radial";
@@ -762,7 +934,7 @@ const DATA = __DATA__;
       if (state.hidden.has(i)) return;
       const c = CL[i], col = colorOf(i);
       const grp = el("g", { class: "cluster" + (state.focus != null && state.focus !== i ? " dim" : "") }, vp);
-      if (radial) el("circle", { cx: g.cx, cy: g.cy, r: g.foot - 10, fill: col, "fill-opacity": 0.04, stroke: col, "stroke-opacity": 0.25, "stroke-dasharray": "3 4" }, grp);
+      if (radial) el("circle", { "data-drag": "c" + i, cx: g.cx, cy: g.cy, r: g.foot - 10, fill: col, "fill-opacity": 0.04, stroke: col, "stroke-opacity": 0.25, "stroke-dasharray": "3 4" }, grp);
       // spokes
       const lines = el("g", {}, grp);
       c.members.forEach((m, j) => {
@@ -773,7 +945,7 @@ const DATA = __DATA__;
       // members
       c.members.forEach((m, j) => {
         const p = g.members[j];
-        const ng = el("g", { class: "pt" }, grp);
+        const ng = el("g", { class: "pt", "data-drag": `m${i}:${j}` }, grp);
         el("circle", { class: "node", cx: p.x, cy: p.y, r: 4, fill: col, stroke: halo, "stroke-width": 1.5 }, ng);
         const label = clip(m.word);
         if (radial) {
@@ -789,7 +961,7 @@ const DATA = __DATA__;
         nodes.push({ el: ng, ci: i, p: m, x: p.x, y: p.y, ext: radial ? textW(label) + 10 : 6, hit, kind: "member" });
       });
       // center on top
-      const cg = el("g", { class: "pt" }, grp);
+      const cg = el("g", { class: "pt", "data-drag": "c" + i }, grp);
       el("circle", { class: "node", cx: g.center.x, cy: g.center.y, r: radial ? 9 : 7, fill: col, stroke: halo, "stroke-width": 2.5 }, cg);
       el("text", { x: g.center.x, y: g.center.y + (radial ? 24 : 20), "text-anchor": "middle", fill: ink, "font-size": 13, "font-weight": 700,
         stroke: halo, "stroke-width": 4, "paint-order": "stroke", "stroke-linejoin": "round" }, cg).textContent = clip(c.center.word, 18);
@@ -797,7 +969,7 @@ const DATA = __DATA__;
       if (chit) cg.classList.add("hit");
       nodes.push({ el: cg, ci: i, p: c.center, x: g.center.x, y: g.center.y, ext: radial ? g.foot - 10 : 10, hit: chit, kind: "center" });
       // title
-      const t = el("text", { x: g.title.x, y: g.title.y, "text-anchor": "middle", fill: ink, "font-size": 12, "font-weight": 600,
+      const t = el("text", { "data-drag": "c" + i, x: g.title.x, y: g.title.y, "text-anchor": "middle", fill: ink, "font-size": 12, "font-weight": 600,
         stroke: halo, "stroke-width": 4, "paint-order": "stroke" }, grp);
       t.textContent = `簇 ${c.id} · ${c.size} 个${c.truncated ? `（省略 ${c.truncated}）` : ""}`;
     });
@@ -805,10 +977,10 @@ const DATA = __DATA__;
     if (L.noise.length) {
       const grp = el("g", { class: state.focus != null ? "dim" : "" }, vp);
       if (L.noise.titleAt) el("text", { x: L.noise.titleAt.x, y: L.noise.titleAt.y, fill: muted, "font-size": 12, "font-weight": 600 }, grp)
-        .textContent = `噪声点（label = -1）· ${NOISE.length} 个`;
+        .textContent = `噪声点（label = -1）· ${S.n_noise} 个${NOISE.length < S.n_noise ? `（显示 ${NOISE.length} 个）` : ""}`;
       NOISE.forEach((p, j) => {
         const q2 = L.noise[j];
-        const ng = el("g", { class: "pt" }, grp);
+        const ng = el("g", { class: "pt", "data-drag": "n" + j }, grp);
         el("circle", { class: "node", cx: q2.x, cy: q2.y, r: 3.5, fill: noiseC, stroke: halo, "stroke-width": 1 }, ng);
         if (radial) el("text", { class: "ml", x: q2.x + 8, y: q2.y, dy: "0.35em", fill: muted, "font-size": FONT - 1 }, ng).textContent = clip(p.word, 18);
         const hit = q && p.word.toLowerCase().includes(q);
@@ -851,12 +1023,21 @@ const DATA = __DATA__;
     applyView();
   }, { passive: false });
   let drag = null;
-  svg.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, moved: false }; svg.setPointerCapture(e.pointerId); svg.classList.add("drag"); });
+  svg.addEventListener("pointerdown", (e) => {
+    const t = e.target.closest && e.target.closest("[data-drag]");
+    const key = t ? t.getAttribute("data-drag") : null, o = key ? off(key) : { dx: 0, dy: 0 };
+    drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, moved: false, key, ox: o.dx, oy: o.dy };
+    svg.setPointerCapture(e.pointerId); svg.classList.add("drag");
+  });
   svg.addEventListener("pointermove", (e) => {
     if (drag) {
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
       if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
-      view.x = drag.vx + dx; view.y = drag.vy + dy; applyView(); tip.style.display = "none"; return;
+      tip.style.display = "none";
+      if (drag.key) {
+        if (drag.moved) { offsets[state.layout][drag.key] = { dx: drag.ox + dx / view.k, dy: drag.oy + dy / view.k }; renderSoon(); }
+      } else { view.x = drag.vx + dx; view.y = drag.vy + dy; applyView(); }
+      return;
     }
     showTip(e);
   });
@@ -879,7 +1060,10 @@ const DATA = __DATA__;
     if (p.prob != null) rows.push(["隶属概率", (+p.prob).toFixed(3)]);
     if (p.outlier != null) rows.push(["离群分数", (+p.outlier).toFixed(3)]);
     if (p.x != null && p.y != null) rows.push(["坐标", `${(+p.x).toFixed(3)}, ${(+p.y).toFixed(3)}`]);
-    if (c && d.kind === "center") rows.push(["簇大小", c.size], ["平均概率", c.mean_prob == null ? "—" : (+c.mean_prob).toFixed(3)]);
+    if (c && d.kind === "center") {
+      rows.push(["簇大小", c.size], [M.mode === "summary" ? "平均隶属度" : "平均概率", c.mean_prob == null ? "—" : (+c.mean_prob).toFixed(3)]);
+      if (c.info) for (const k in c.info) rows.push([k, clip(String(c.info[k]), 40)]);
+    }
     if (p.extra) for (const k in p.extra) rows.push([k, clip(String(p.extra[k]), 40)]);
     tip.innerHTML = `<div class="t"><span class="sw" style="background:${col}"></span>${esc(p.word)}</div>` +
       rows.map(([k, v]) => `<div class="r"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join("");
@@ -909,6 +1093,7 @@ const DATA = __DATA__;
     zoomTo({ x0: b.x0 - 160, y0: b.y0 - 120, x1: b.x1 + 160, y1: b.y1 + 120 });
   };
   $("fit").onclick = fit;
+  $("reset").onclick = () => { offsets[state.layout] = {}; render(); };
 
   // ---------- export
   function exportSvg() {

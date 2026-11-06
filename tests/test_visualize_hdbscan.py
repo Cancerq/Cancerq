@@ -181,6 +181,29 @@ def main() -> int:
         check(vh.split_terms("x | y ; z") == [("x", None), ("y", None), ("z", None)], "mixed separators")
         check(vh.split_terms("") == [] and vh.split_terms(None) == [], "empty preview")
 
+        print("\n-- words shared across clusters --")
+        sh = work / "shared.csv"
+        sh.write_text(
+            "hdbscan_label,term_count,frequent_term_preview\n"
+            "-1,9,coach; wound\n"
+            "0,10,gun; hunting; wound\n"
+            "1,10,golf; hunting; Coach\n"
+            "2,10,pills;  Wound \n"
+            "3,10,coach; therapist\n",
+            encoding="utf-8",
+        )
+        shared = {e["word"].lower(): e for e in build(sh)["shared"]}
+        check(set(shared) == {"wound", "hunting", "coach"}, "shared words found, case and spaces ignored")
+        check(shared["wound"]["clusters"] == [0, 2], "wound in clusters 0 and 2 (noise not counted)")
+        check(shared["coach"]["as_center"] == [3], "center occurrence recorded")
+        check(build(sh)["shared"][0]["word"].lower() in {"wound", "hunting", "coach"}, "sorted list")
+        ds = build(csv_path)
+        check(ds["shared"] == [], "no shared words when clusters are disjoint")
+        cross = work / "cross.csv"
+        cross.write_text("word,cluster\nx,0\ny,0\nx,1\nz,1\ny,1\n", encoding="utf-8")
+        check([(e["word"], e["clusters"]) for e in build(cross)["shared"]] == [("x", [0, 1]), ("y", [0, 1])],
+              "per-word tables too")
+
         print("\n-- CLI end to end --")
         out = work / "page.html"
         log = run([str(csv_path), "-o", str(out), "--param", "min_cluster_size=8",

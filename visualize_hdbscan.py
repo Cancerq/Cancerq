@@ -386,6 +386,7 @@ def build_dataset(records: list[dict], params: dict, *, source: Path, fmt: str,
         "params": params,
         "stats": stats,
         "clusters": clusters,
+        "shared": find_shared(clusters),
         "noise": noise,
     }
 
@@ -514,8 +515,32 @@ def build_summary_dataset(records: list[dict], params: dict, *, source: Path, fm
         "params": params,
         "stats": stats,
         "clusters": clusters,
+        "shared": find_shared(clusters),
         "noise": noise,
     }
+
+
+def norm_word(w: str) -> str:
+    """跨簇比较词时用：去首尾空白、合并空白、不区分大小写。页面里的 JS 用同样的规则。"""
+    return " ".join(str(w).split()).lower()
+
+
+def find_shared(clusters: list[dict]) -> list[dict]:
+    """在不同簇里都出现（且画出来了）的词。按出现的簇数从多到少排。"""
+    seen: dict[str, dict] = {}
+    for c in clusters:
+        for p in [c["center"], *c["members"]]:
+            key = norm_word(p["word"])
+            if not key:
+                continue
+            entry = seen.setdefault(key, {"word": p["word"], "clusters": [], "as_center": []})
+            if c["id"] not in entry["clusters"]:
+                entry["clusters"].append(c["id"])
+            if p is c["center"] and c["id"] not in entry["as_center"]:
+                entry["as_center"].append(c["id"])
+    shared = [e for e in seen.values() if len(e["clusters"]) > 1]
+    shared.sort(key=lambda e: (-len(e["clusters"]), norm_word(e["word"])))
+    return shared
 
 
 def pick_center(members: list[dict]) -> dict:
@@ -663,6 +688,9 @@ table.kv td:last-child { text-align: right; font-variant-numeric: tabular-nums; 
 .empty { color: var(--muted); font-size: 12px; }
 table.kv td.empty { white-space: normal; text-align: left; word-break: break-word; }
 svg#canvas [data-drag] { cursor: move; }
+.legend.shared-list li { grid-template-columns: minmax(0, 1fr) auto; }
+.shared-list .cls { color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sl { cursor: help; }
 .controls { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
 .controls label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
 input[type=search] { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--page); color: var(--ink); font: inherit; }
@@ -731,6 +759,10 @@ svg#canvas.drag { cursor: grabbing; }
 
     <h2 id="legendTitle">簇（点击定位，再点取消）</h2>
     <ul class="legend" id="legend"></ul>
+
+    <h2 id="sharedTitle">跨簇共享词</h2>
+    <div class="controls" style="margin-bottom:6px"><label><input type="checkbox" id="showLinks" checked> 用虚线连接相同的词</label></div>
+    <ul class="legend shared-list" id="shared"></ul>
   </aside>
   <main>
     <svg id="canvas" xmlns="http://www.w3.org/2000/svg"><g id="vp"></g></svg>
@@ -793,7 +825,33 @@ const DATA = __DATA__;
   if (!M.has_xy) { const b = document.querySelector('[data-l="coords"]'); b.disabled = true; b.title = "数据里没有 x / y 坐标列"; }
 
   // ---------- state
-  const state = { layout: "radial", focus: null, hidden: new Set(), noise: true, labels: true, query: "" };
+  const state = { layout: "radial", focus: null, hidden: new Set(), noise: true, labels: true, query: "", links: true, sharedSel: null };
+  const SHARED = DATA.shared || [];
+  const normWord = (w) => String(w).trim().replace(/\s+/g, " ").toLowerCase();
+  const sharedMap = new Map(SHARED.map((e) => [normWord(e.word), e]));
+  const idIndex = new Map(CL.map((c, i) => [String(c.id), i]));
+
+  function buildShared() {
+    $("sharedTitle").textContent = `跨簇共享词（${SHARED.length}）`;
+    const ul = $("shared"); ul.innerHTML = "";
+    if (!SHARED.length) { ul.innerHTML = `<li class="empty">各簇之间没有相同的词</li>`; return; }
+    SHARED.forEach((e) => {
+      const key = normWord(e.word);
+      const li = document.createElement("li");
+      li.className = state.sharedSel === key ? "on" : "";
+      const sw = e.clusters.map((id) => `<span class="sw" style="display:inline-block;width:8px;height:8px;margin-left:3px;background:${colorOf(idIndex.get(String(id)))}"></span>`).join("");
+      li.title = `「${e.word}」出现在簇 ${e.clusters.join("、")}${e.as_center.length ? `（在簇 ${e.as_center.join("、")} 是中心）` : ""}\n点击高亮并定位，再点取消`;
+      li.innerHTML = `<span class="name">${esc(clip(e.word, 22))}</span><span class="cls">簇 ${esc(e.clusters.join(", "))}${sw}</span>`;
+      li.onclick = () => {
+        state.sharedSel = state.sharedSel === key ? null : key; render();
+        if (state.sharedSel) {
+          const hits = nodes.filter((n) => n.kind !== "noise" && normWord(n.p.word) === key);
+          if (hits.length) zoomTo(hits.reduce((a, n) => ({ x0: Math.min(a.x0, n.x - 120), y0: Math.min(a.y0, n.y - 80), x1: Math.max(a.x1, n.x + 120), y1: Math.max(a.y1, n.y + 80) }), { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity }));
+        }
+      };
+      ul.appendChild(li);
+    });
+  }
   let view = { x: 0, y: 0, k: 1 }, bounds = null, nodes = [];
 
   function buildLegend() {
@@ -950,6 +1008,7 @@ const DATA = __DATA__;
   // ---------- render
   function render() {
     buildLegend();
+    buildShared();
     vp.innerHTML = "";
     nodes = [];
     const L = state.layout === "coords" ? coordsLayout() : radialLayout();
@@ -974,6 +1033,7 @@ const DATA = __DATA__;
       c.members.forEach((m, j) => {
         const p = g.members[j];
         const ng = el("g", { class: "pt", "data-drag": `m${i}:${j}` }, grp);
+        if (sharedMap.has(normWord(m.word))) el("circle", { cx: p.x, cy: p.y, r: 7.5, fill: "none", stroke: ink2, "stroke-width": 1.2, "stroke-dasharray": "2 2" }, ng);
         el("circle", { class: "node", cx: p.x, cy: p.y, r: 4, fill: col, stroke: halo, "stroke-width": 1.5 }, ng);
         const label = clip(m.word);
         if (radial) {
@@ -983,16 +1043,17 @@ const DATA = __DATA__;
         } else {
           el("text", { class: "ml", x: p.x + 6, y: p.y, dy: "0.35em", fill: ink2, "font-size": FONT - 1 }, ng).textContent = label;
         }
-        const hit = q && m.word.toLowerCase().includes(q);
+        const hit = (q && m.word.toLowerCase().includes(q)) || (state.sharedSel != null && normWord(m.word) === state.sharedSel);
         if (hit) ng.classList.add("hit");
         nodes.push({ el: ng, ci: i, p: m, x: p.x, y: p.y, ext: radial ? textW(label) + 10 : 6, hit, kind: "member" });
       });
       // center on top
       const cg = el("g", { class: "pt", "data-drag": "c" + i }, grp);
+      if (sharedMap.has(normWord(c.center.word))) el("circle", { cx: g.center.x, cy: g.center.y, r: radial ? 13 : 11, fill: "none", stroke: ink2, "stroke-width": 1.2, "stroke-dasharray": "2 2" }, cg);
       el("circle", { class: "node", cx: g.center.x, cy: g.center.y, r: radial ? 9 : 7, fill: col, stroke: halo, "stroke-width": 2.5 }, cg);
       el("text", { x: g.center.x, y: g.center.y + (radial ? 24 : 20), "text-anchor": "middle", fill: ink, "font-size": 13, "font-weight": 700,
         stroke: halo, "stroke-width": 4, "paint-order": "stroke", "stroke-linejoin": "round" }, cg).textContent = clip(c.center.word, 18);
-      const chit = q && c.center.word.toLowerCase().includes(q);
+      const chit = (q && c.center.word.toLowerCase().includes(q)) || (state.sharedSel != null && normWord(c.center.word) === state.sharedSel);
       if (chit) cg.classList.add("hit");
       nodes.push({ el: cg, ci: i, p: c.center, x: g.center.x, y: g.center.y, ext: radial ? g.foot - 10 : 10, hit: chit, kind: "center" });
       // title
@@ -1013,6 +1074,32 @@ const DATA = __DATA__;
         const hit = q && p.word.toLowerCase().includes(q);
         if (hit) ng.classList.add("hit");
         nodes.push({ el: ng, ci: -1, p, x: q2.x, y: q2.y, ext: 4, hit, kind: "noise" });
+      });
+    }
+
+    // dashed links between the same word in different clusters (drawn underneath everything)
+    if (state.links && SHARED.length) {
+      const layer = el("g", { class: "links" });
+      vp.insertBefore(layer, vp.firstChild);
+      const byWord = new Map();
+      nodes.forEach((d) => {
+        if (d.kind === "noise") return;
+        const k = normWord(d.p.word);
+        if (!sharedMap.has(k)) return;
+        if (!byWord.has(k)) byWord.set(k, []);
+        byWord.get(k).push(d);
+      });
+      byWord.forEach((list, k) => {
+        const sel = state.sharedSel === k;
+        for (let a = 0; a < list.length; a++) for (let b = a + 1; b < list.length; b++) {
+          const A = list[a], B = list[b];
+          if (A.ci === B.ci) continue;
+          const dim = (state.sharedSel != null && !sel) || (state.focus != null && A.ci !== state.focus && B.ci !== state.focus);
+          const lg = el("g", { class: "sl" + (dim ? " dim" : ""), "data-word": k }, layer);
+          el("line", { x1: A.x, y1: A.y, x2: B.x, y2: B.y, stroke: "transparent", "stroke-width": 10 }, lg);
+          el("line", { x1: A.x, y1: A.y, x2: B.x, y2: B.y, stroke: sel ? ink : ink2, "stroke-width": sel ? 2.2 : 1.3,
+            "stroke-opacity": sel ? 0.9 : 0.55, "stroke-dasharray": "6 5", "stroke-linecap": "round" }, lg);
+        }
       });
     }
 
@@ -1077,6 +1164,13 @@ const DATA = __DATA__;
 
   // ---------- tooltip
   function showTip(e) {
+    const sl = e.target.closest && e.target.closest(".sl");
+    if (sl) {
+      const en = sharedMap.get(sl.getAttribute("data-word"));
+      tip.innerHTML = `<div class="t">共享词：${esc(en.word)}</div>` +
+        en.clusters.map((id) => { const i = idIndex.get(String(id)); return `<div class="r"><span><span class="sw" style="display:inline-block;width:8px;height:8px;margin-right:5px;background:${colorOf(i)}"></span>簇 ${esc(id)}</span><span>${en.as_center.includes(id) ? "中心" : "成员"} · 中心「${esc(clip(CL[i].center.word, 12))}」</span></div>`; }).join("");
+      placeTip(e); return;
+    }
     const g = e.target.closest && e.target.closest(".pt");
     const d = g && nodes.find((n) => n.el === g);
     if (!d) { tip.style.display = "none"; return; }
@@ -1094,6 +1188,11 @@ const DATA = __DATA__;
     if (p.extra) for (const k in p.extra) rows.push([k, clip(String(p.extra[k]), 40)]);
     tip.innerHTML = `<div class="t"><span class="sw" style="background:${col}"></span>${esc(p.word)}</div>` +
       rows.map(([k, v]) => `<div class="r"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join("");
+    const sh = sharedMap.get(normWord(p.word));
+    if (sh && d.kind !== "noise") tip.innerHTML += `<div class="r"><span>也出现在</span><span>簇 ${esc(sh.clusters.filter((id) => !c || String(id) !== String(c.id)).join(", "))}</span></div>`;
+    placeTip(e);
+  }
+  function placeTip(e) {
     const r = svg.getBoundingClientRect();
     tip.style.display = "block";
     let x = e.clientX - r.left + 14, y = e.clientY - r.top + 14;
@@ -1110,6 +1209,7 @@ const DATA = __DATA__;
     render(); state.focus == null ? fit() : zoomTo(clusterBox(state.focus));
   });
   $("showNoise").onchange = (e) => { state.noise = e.target.checked; render(); fit(); };
+  $("showLinks").onchange = (e) => { state.links = e.target.checked; render(); };
   $("showLabels").onchange = (e) => { state.labels = e.target.checked; render(); };
   $("search").oninput = (e) => { state.query = e.target.value; render(); };
   $("search").onkeydown = (e) => {
